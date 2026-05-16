@@ -17,22 +17,26 @@ go build -o vpsctl.exe .
 
 ## 📋 Komande
 
-| Komanda                      | Opis                                       |
-| ---------------------------- | ------------------------------------------ |
-| `vpsctl version`             | Ispiši verziju                             |
-| `vpsctl list`                | Listaj sve konfigurirane servere           |
-| `vpsctl ping`                | TCP ping svih servera s latencijom         |
-| `vpsctl exec <server> <cmd>` | Izvrši komandu na jednom serveru           |
-| `vpsctl exec all <cmd>`      | Izvrši komandu na svim serverima paralelno |
+| Komanda                                 | Opis                                        |
+| --------------------------------------- | ------------------------------------------- |
+| `vpsctl version`                        | Ispisi verziju                              |
+| `vpsctl list`                           | Listaj sve konfigurirane servere            |
+| `vpsctl ping`                           | TCP ping svih servera s latencijom          |
+| `vpsctl exec <server\|all> <cmd>`       | Izvrsi komandu na jednom ili svim serverima |
+| `vpsctl update <server\|all>`           | System update (apt/yum/apk)                 |
+| `vpsctl restart <server\|all> <servis>` | Restart systemd servisa                     |
 
-### Primjeri
+### 📌 Primjeri
 
 ```bash
 vpsctl list
 vpsctl ping
 vpsctl exec mellon "uptime"
-vpsctl exec mellon "df -h"
-vpsctl exec all "uptime"
+vpsctl exec all "df -h"
+vpsctl update mellon
+vpsctl update all
+vpsctl restart mellon nginx
+vpsctl restart all php8.3-fpm
 ```
 
 ---
@@ -41,7 +45,7 @@ vpsctl exec all "uptime"
 
 Serveri se definiraju u `configs/servers.yaml`.
 
-> ⚠️ `servers.yaml` nije na gitu. Koristi `servers.example.yaml` kao predložak.
+> servers.yaml nije na gitu. Koristi `servers.example.yaml` kao predlozak.
 
 ```yaml
 servers:
@@ -62,13 +66,21 @@ servers:
 
 ## 🔐 Autentikacija
 
-Prioritet kojim se autentikacija rješava:
+1. SSH kljuc ako je `key:` definiran i postoji na disku
+2. Password iz YAML-a ako je `password:` definiran
+3. Interaktivni prompt ako nema ni jedno od gore navedenog
 
-1. 🔑 **SSH ključ** — ako je `key:` definiran i postoji na disku
-2. 🔒 **Password iz YAML-a** — ako je `password:` definiran
-3. ⌨️ **Interaktivni prompt** — pita šifru u terminalu
+---
 
-Podržava `password` i `keyboard-interactive` SSH metode.
+## 📄 Logging
+
+Svaki `exec`, `update` i `restart` logira se u `logs/vpsctl.log`:
+
+```
+[2026-05-16 12:49:53] mellon - "uptime"
+ 12:49:53 up 23 days, 4:54, 0 users
+---
+```
 
 ---
 
@@ -77,19 +89,21 @@ Podržava `password` i `keyboard-interactive` SSH metode.
 ```
 vpsctl/
 ├── cmd/
-│   ├── root.go        # Cobra root
-│   ├── version.go     # vpsctl version
-│   ├── list.go        # vpsctl list
-│   ├── ping.go        # vpsctl ping — TCP dial, paralelno, latencija
-│   └── exec.go        # vpsctl exec
+│   ├── root.go
+│   ├── version.go
+│   ├── list.go
+│   ├── ping.go
+│   ├── exec.go
+│   ├── update.go
+│   └── restart.go
 ├── internal/
-│   ├── config/
-│   │   └── config.go  # YAML loader
-│   └── ssh/
-│       └── ssh.go     # SSH konekcija i auth
+│   ├── config/config.go
+│   ├── ssh/ssh.go
+│   ├── output/output.go
+│   └── logger/logger.go
 ├── configs/
-│   ├── servers.yaml          # tvoji serveri (nije na gitu)
-│   └── servers.example.yaml  # predložak
+│   ├── servers.yaml
+│   └── servers.example.yaml
 └── main.go
 ```
 
@@ -98,12 +112,14 @@ vpsctl/
 ## 🗺️ Roadmap
 
 - [x] Cobra CLI setup
-- [x] YAML config (Viper)
-- [x] SSH exec — jedan server
-- [x] SSH exec — svi serveri paralelno
+- [x] YAML config
+- [x] SSH exec jedan server
+- [x] SSH exec svi serveri paralelno
 - [x] Password + key + interaktivna autentikacija
-- [x] TCP ping s latencijom — paralelno, 3s timeout
-- [ ] Logging rezultata u fajl
-- [ ] `vpsctl update` — apt update/upgrade
-- [ ] `vpsctl restart <servis>` — systemctl restart
-- [ ] `vpsctl ssh <server>` — interaktivni shell
+- [x] TCP ping s latencijom
+- [x] Colored output
+- [x] Logging u fajl
+- [x] SSH timeout
+- [x] vpsctl update
+- [x] vpsctl restart
+- [ ] vpsctl ssh - interaktivni shell

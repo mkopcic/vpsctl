@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"fmt"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -31,7 +31,7 @@ var pingCmd = &cobra.Command{
 			go func(server config.Server) {
 				defer wg.Done()
 
-				addr := fmt.Sprintf("%s:%d", server.Host, server.Port)
+				addr := net.JoinHostPort(server.Host, strconv.Itoa(server.Port))
 
 				start := time.Now()
 				conn, err := net.DialTimeout("tcp", addr, 3*time.Second)

@@ -2,7 +2,9 @@ package sshclient
 
 import (
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -30,7 +32,7 @@ func RunCommand(cfg Config, command string) (string, error) {
 		Timeout:         10 * time.Second,
 	}
 
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 
 	client, err := ssh.Dial("tcp", addr, clientConfig)
 	if err != nil {
