@@ -25,6 +25,7 @@ go build -o vpsctl.exe .
 | `vpsctl exec <server\|all> <cmd>` | Izvrsi komandu na jednom ili svim serverima |
 | `vpsctl update <server\|all>` | System update (apt/yum/apk) |
 | `vpsctl restart <server\|all> <servis>` | Restart systemd servisa |
+| `vpsctl history [server]` | Prikazi job history iz baze |
 | `vpsctl serve` | Pokreni HTTP API server (default port 8080) |
 
 ### Primjeri
@@ -36,6 +37,9 @@ vpsctl exec mellon "uptime"
 vpsctl exec all "df -h"
 vpsctl update mellon
 vpsctl restart mellon nginx
+vpsctl history
+vpsctl history mellon
+vpsctl history mellon --limit 50
 vpsctl serve
 vpsctl serve --port 9000
 ```
@@ -61,47 +65,20 @@ vpsctl serve --port 8080
 ### Primjeri
 
 ```bash
-# Lista servera
 curl http://localhost:8080/servers
-
-# Ping svih
 curl http://localhost:8080/servers/ping
 
-# Exec na jednom serveru
 curl -X POST http://localhost:8080/servers/exec \
   -H "Content-Type: application/json" \
   -d '{"server":"mellon","command":"uptime"}'
 
-# Exec na svim serverima
-curl -X POST http://localhost:8080/servers/exec \
-  -H "Content-Type: application/json" \
-  -d '{"server":"all","command":"df -h"}'
-
-# Update jednog servera
 curl -X POST http://localhost:8080/servers/update \
   -H "Content-Type: application/json" \
-  -d '{"server":"mellon"}'
+  -d '{"server":"all"}'
 
-# Restart servisa
 curl -X POST http://localhost:8080/servers/restart \
   -H "Content-Type: application/json" \
   -d '{"server":"mellon","service":"nginx"}'
-```
-
-### JSON response format
-
-```json
-// GET /servers
-[{"name":"mellon","host":"mellon.hr","port":2222,"user":"mellonwe"}]
-
-// GET /servers/ping
-[{"server":"mellon","host":"mellon.hr","ok":true,"latency_ms":61}]
-
-// POST /servers/exec (uspjeh)
-[{"server":"mellon","output":"13:48 up 23 days...","ok":true}]
-
-// POST /servers/exec (greska)
-[{"server":"mellon","ok":false,"error":"timeout nakon 30s"}]
 ```
 
 ---
@@ -137,14 +114,17 @@ servers:
 
 ---
 
-## Logging
+## Logging i history
 
-Svaki `exec`, `update` i `restart` (CLI i API) logira se u `logs/vpsctl.log`:
+Svaka operacija (exec, update, restart) sprema se na dva mjesta:
+
+- `logs/vpsctl.log` — plain text, timestamp + output
+- `data/vpsctl.db` — SQLite baza, trajanje, source (cli/api)
 
 ```
-[2026-05-16 13:48:14] mellon - "uptime"
- 13:48:14 up 23 days, 5:53, 0 users
----
+vpsctl history
+[2026-05-16 14:00:54] [OK  ] mellon    1558ms — df -h /
+[2026-05-16 14:00:53] [OK  ] mellon    1133ms — uptime
 ```
 
 ---
@@ -161,16 +141,22 @@ vpsctl/
 │   ├── exec.go
 │   ├── update.go
 │   ├── restart.go
+│   ├── history.go
 │   └── serve.go
 ├── internal/
 │   ├── config/config.go
 │   ├── ssh/ssh.go
 │   ├── output/output.go
 │   ├── logger/logger.go
+│   ├── store/
+│   │   ├── store.go   (DB init, sync.Once)
+│   │   └── job.go     (Job struct, Save, List)
 │   └── api/api.go
 ├── configs/
 │   ├── servers.yaml
 │   └── servers.example.yaml
+├── data/              (nije na gitu)
+├── logs/              (nije na gitu)
 └── main.go
 ```
 
@@ -190,6 +176,7 @@ vpsctl/
 - [x] vpsctl update
 - [x] vpsctl restart
 - [x] REST API (Gin)
+- [x] SQLite job history
+- [x] vpsctl history
 - [ ] vpsctl ssh - interaktivni shell
-- [ ] SQLite - job history
 - [ ] Docker deploy

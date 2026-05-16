@@ -11,6 +11,7 @@ import (
 	"github.com/mkopcic/vpsctl/internal/config"
 	"github.com/mkopcic/vpsctl/internal/logger"
 	sshclient "github.com/mkopcic/vpsctl/internal/ssh"
+	"github.com/mkopcic/vpsctl/internal/store"
 )
 
 // --- REQUEST STRUKTURE ---
@@ -203,8 +204,8 @@ func restartService(c *gin.Context) {
 
 // --- HELPER ---
 
-// runOnTargets izvrsava komandu na jednom serveru ili svima ("all")
-// Vraca listu ServerResult — ista logika kao u cmd/exec.go ali za API
+// runOnTargets izvrsava komandu na jednom serveru ili svima ("all").
+// Mjeri trajanje, logira u fajl i sprema u SQLite s source="api".
 func runOnTargets(cfg *config.Config, target, command string) []ServerResult {
 	var results []ServerResult
 
@@ -214,6 +215,8 @@ func runOnTargets(cfg *config.Config, target, command string) []ServerResult {
 			continue
 		}
 
+		start := time.Now()
+
 		out, err := sshclient.RunCommand(sshclient.Config{
 			User:     s.User,
 			Host:     s.Host,
@@ -222,13 +225,18 @@ func runOnTargets(cfg *config.Config, target, command string) []ServerResult {
 			Password: s.Password,
 		}, command)
 
+		// Spremi u SQLite — source="api" da razlikujemo od CLI poziva
+		job := store.NewJob(s.Name, command, out, "", "api", err == nil, start)
 		if err != nil {
+			job.Error = err.Error()
+			store.Save(job)
 			results = append(results, ServerResult{
 				Server: s.Name,
 				OK:     false,
 				Error:  err.Error(),
 			})
 		} else {
+			store.Save(job)
 			logger.Log(s.Name, command, out)
 			results = append(results, ServerResult{
 				Server: s.Name,
