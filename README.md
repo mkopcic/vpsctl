@@ -17,13 +17,13 @@ go build -o vpsctl.exe .
 
 ## 📋 Komande
 
-| Komanda | Opis |
-|---|---|
-| `vpsctl version` | Ispiši verziju |
-| `vpsctl list` | Listaj sve konfigurirane servere |
-| `vpsctl ping` | TCP ping svih servera s latencijom |
-| `vpsctl exec <server> <cmd>` | Izvrši komandu na jednom serveru |
-| `vpsctl exec all <cmd>` | Izvrši komandu na svim serverima paralelno |
+| Komanda                      | Opis                                       |
+| ---------------------------- | ------------------------------------------ |
+| `vpsctl version`             | Ispiši verziju                             |
+| `vpsctl list`                | Listaj sve konfigurirane servere           |
+| `vpsctl ping`                | TCP ping svih servera s latencijom         |
+| `vpsctl exec <server> <cmd>` | Izvrši komandu na jednom serveru           |
+| `vpsctl exec all <cmd>`      | Izvrši komandu na svim serverima paralelno |
 
 ### Primjeri
 
