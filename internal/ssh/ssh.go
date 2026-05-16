@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/term"
 )
+
+const defaultTimeout = 30 * time.Second
 
 type Config struct {
 	User     string
@@ -24,6 +27,7 @@ func RunCommand(cfg Config, command string) (string, error) {
 		User:            cfg.User,
 		Auth:            auth,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
@@ -40,21 +44,35 @@ func RunCommand(cfg Config, command string) (string, error) {
 	}
 	defer session.Close()
 
-	output, err := session.CombinedOutput(command)
-	return string(output), err
+	type result struct {
+		output string
+		err    error
+	}
+
+	ch := make(chan result, 1)
+
+	go func() {
+		out, err := session.CombinedOutput(command)
+		ch <- result{string(out), err}
+	}()
+
+	select {
+	case r := <-ch:
+		return r.output, r.err
+	case <-time.After(defaultTimeout):
+		return "", fmt.Errorf("timeout nakon %s", defaultTimeout)
+	}
 }
 
 func buildAuth(cfg Config) []ssh.AuthMethod {
 	var methods []ssh.AuthMethod
 
-	// pokušaj key auth ako je key definiran i postoji
 	if cfg.Key != "" {
 		if signer, err := loadKey(cfg.Key); err == nil {
 			methods = append(methods, ssh.PublicKeys(signer))
 		}
 	}
 
-	// password iz YAML-a — proba obje metode jer serveri koriste različite
 	if cfg.Password != "" {
 		methods = append(methods, ssh.Password(cfg.Password))
 		methods = append(methods, ssh.KeyboardInteractive(func(user, instruction string, questions []string, echos []bool) ([]string, error) {
@@ -66,7 +84,6 @@ func buildAuth(cfg Config) []ssh.AuthMethod {
 		}))
 	}
 
-	// interaktivni prompt kao fallback
 	if cfg.Password == "" {
 		methods = append(methods, ssh.PasswordCallback(func() (string, error) {
 			fmt.Printf("Password for %s@%s: ", cfg.User, cfg.Host)
