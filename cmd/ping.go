@@ -1,39 +1,37 @@
-/*
-Copyright © 2026 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
 	"fmt"
 
+	"github.com/mkopcic/vpsctl/internal/config"
 	"github.com/spf13/cobra"
 )
 
-// pingCmd represents the ping command
 var pingCmd = &cobra.Command{
 	Use:   "ping",
-	Short: "Ping all servers",
-	Run: func(cmd *cobra.Command, args []string) {
+	Short: "Ping all configured servers",
 
-		for _, server := range servers {
+	RunE: func(cmd *cobra.Command, args []string) error {
+
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+
+		for _, server := range cfg.Servers {
+
+			// za sada fake ping
 			fmt.Printf(
-				"[OK] %s\n",
+				"[OK] %s (%s)\n",
 				server.Name,
+				server.Host,
 			)
 		}
+
+		return nil
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(pingCmd)
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// pingCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// pingCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }

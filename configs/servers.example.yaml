@@ -1,0 +1,12 @@
+servers:
+  - name: my-server
+    host: example.com
+    port: 22
+    user: root
+    key: C:/Users/yourname/.ssh/id_rsa
+
+  - name: my-server-password
+    host: example2.com
+    port: 2222
+    user: deploy
+    password: yourpassword
