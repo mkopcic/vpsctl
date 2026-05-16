@@ -2,38 +2,46 @@ package cmd
 
 import (
 	"fmt"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mkopcic/vpsctl/internal/api"
+	"github.com/mkopcic/vpsctl/internal/web"
 	"github.com/spf13/cobra"
 )
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Start HTTP API server",
+	Short: "Start HTTP API server with web UI",
 
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Dohvati --port flag (default 8080)
 		port, _ := cmd.Flags().GetInt("port")
 
-		// gin.Default() uključuje Logger i Recovery middleware
-		// Logger = svaki request se logira u terminal
-		// Recovery = panic ne srusi server, vraca 500
+		// gin.Default() = Logger + Recovery middleware
 		r := gin.Default()
 
-		// Registriraj sve /servers/* rute iz internal/api/api.go
+		// REST API rute (/servers/*, /jobs)
 		api.Setup(r)
 
-		addr := fmt.Sprintf(":%d", port)
-		fmt.Printf("vpsctl API server running on http://localhost%s\n", addr)
+		// Web UI — embedded staticki fajlovi iz internal/web/static/
+		// Gin servira sve fajlove pod /ui/ path
+		r.StaticFS("/ui", web.FS())
 
-		// Pokreni server — blokira dok se ne ugasi (Ctrl+C)
+		// Redirect root / -> /ui/ da ne treba tipkati /ui
+		r.GET("/", func(c *gin.Context) {
+			c.Redirect(http.StatusFound, "/ui/")
+		})
+
+		addr := fmt.Sprintf(":%d", port)
+		fmt.Printf("vpsctl running on http://localhost%s\n", addr)
+		fmt.Printf("Web UI:  http://localhost%s/ui/\n", addr)
+		fmt.Printf("API:     http://localhost%s/servers\n", addr)
+
 		return r.Run(addr)
 	},
 }
 
 func init() {
-	// --port flag, default 8080
-	serveCmd.Flags().Int("port", 8080, "Port on which the API server listens")
+	serveCmd.Flags().Int("port", 8080, "Port on which the server listens")
 	rootCmd.AddCommand(serveCmd)
 }

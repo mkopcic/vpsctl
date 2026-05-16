@@ -59,12 +59,15 @@ fi
 func Setup(r *gin.Engine) {
 	servers := r.Group("/servers")
 	{
-		servers.GET("", listServers)        // GET  /servers
-		servers.GET("/ping", pingServers)   // GET  /servers/ping
-		servers.POST("/exec", execCommand)  // POST /servers/exec
-		servers.POST("/update", updateServers) // POST /servers/update
+		servers.GET("", listServers)             // GET  /servers
+		servers.GET("/ping", pingServers)        // GET  /servers/ping
+		servers.POST("/exec", execCommand)       // POST /servers/exec
+		servers.POST("/update", updateServers)   // POST /servers/update
 		servers.POST("/restart", restartService) // POST /servers/restart
 	}
+
+	// GET /jobs?server=mellon&limit=20 — job history za web GUI
+	r.GET("/jobs", listJobs)
 }
 
 // --- HANDLERI ---
@@ -252,4 +255,38 @@ func runOnTargets(cfg *config.Config, target, command string) []ServerResult {
 	}
 
 	return results
+}
+
+// GET /jobs?server=mellon&limit=20
+// Vraca job history iz SQLite za web GUI history tab
+func listJobs(c *gin.Context) {
+	limit := 20
+	if l := c.Query("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+
+	server := c.Query("server")
+
+	var jobs []store.Job
+	var err error
+
+	if server != "" {
+		jobs, err = store.ListByServer(server, limit)
+	} else {
+		jobs, err = store.List(limit)
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Vrati prazan array umjesto null ako nema jobova
+	if jobs == nil {
+		jobs = []store.Job{}
+	}
+
+	c.JSON(http.StatusOK, jobs)
 }

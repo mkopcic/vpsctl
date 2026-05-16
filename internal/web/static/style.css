@@ -1,0 +1,324 @@
+:root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --surface2: #21262d;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --green:    #3fb950;
+    --red:      #f85149;
+    --yellow:   #d29922;
+    --blue:     #58a6ff;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* --- HEADER --- */
+
+header {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+    padding: 0 1.5rem;
+    height: 52px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.logo {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--blue);
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+nav { display: flex; gap: 0.25rem; }
+
+.tab-btn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    padding: 0.4rem 0.9rem;
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    transition: all 0.15s;
+}
+
+.tab-btn:hover  { background: var(--surface2); color: var(--text); }
+.tab-btn.active { background: var(--surface2); color: var(--text); font-weight: 600; }
+
+/* --- MAIN CONTENT --- */
+
+main { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
+
+.tab         { display: none; }
+.tab.active  { display: block; }
+
+/* --- TOOLBAR --- */
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.25rem;
+}
+
+.toolbar h2 {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.toolbar-right { display: flex; gap: 0.5rem; align-items: center; }
+
+/* --- BUTTONS --- */
+
+button {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 0.4rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: border-color 0.15s, color 0.15s;
+}
+
+button:hover    { border-color: var(--blue); color: var(--blue); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* --- INPUTS --- */
+
+input, select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+input:focus, select:focus { border-color: var(--blue); }
+input[type="number"]      { width: 70px; }
+
+/* --- TABLE --- */
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--surface);
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+}
+
+th {
+    text-align: left;
+    padding: 0.55rem 1rem;
+    background: var(--surface2);
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-bottom: 1px solid var(--border);
+}
+
+td {
+    padding: 0.55rem 1rem;
+    border-bottom: 1px solid var(--border);
+    font-family: monospace;
+    font-size: 0.875rem;
+}
+
+tr:last-child td { border-bottom: none; }
+tr:hover td      { background: var(--surface2); }
+
+/* --- STATUS DOTS --- */
+
+.dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 0.4rem;
+    vertical-align: middle;
+}
+
+.dot-ok      { background: var(--green); box-shadow: 0 0 5px var(--green); }
+.dot-fail    { background: var(--red);   box-shadow: 0 0 5px var(--red); }
+.dot-pending { background: var(--muted); }
+
+/* --- BADGES --- */
+
+.badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    font-family: monospace;
+}
+
+.badge-ok   { background: rgba(63,185,80,0.15);  color: var(--green); }
+.badge-fail { background: rgba(248,81,73,0.15);  color: var(--red); }
+.badge-api  { background: rgba(88,166,255,0.15); color: var(--blue); }
+.badge-cli  { background: rgba(139,148,158,0.15);color: var(--muted); }
+
+/* --- LATENCY COLOURS --- */
+
+.lat-fast { color: var(--green); }
+.lat-mid  { color: var(--yellow); }
+.lat-slow { color: var(--red); }
+
+/* --- EXEC FORM --- */
+
+.exec-form {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    max-width: 560px;
+}
+
+.form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.form-row label {
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.form-row select,
+.form-row input { width: 100%; }
+
+/* --- OUTPUT BOX --- */
+
+.output {
+    margin-top: 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+    font-family: monospace;
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    max-height: 420px;
+    overflow-y: auto;
+    max-width: 800px;
+}
+
+.output.hidden { display: none; }
+
+.output-block  { margin-bottom: 0.75rem; }
+.output-server { color: var(--blue); font-weight: 700; margin-bottom: 0.2rem; }
+.output-text   { color: var(--text); }
+.output-error  { color: var(--red); }
+
+/* --- DIVIDER --- */
+
+.divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 1.5rem 0;
+}
+
+/* --- QUICK ACTIONS --- */
+
+.quick-actions {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.quick-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-width: 240px;
+}
+
+.quick-card h3 {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+/* --- API DOCS --- */
+
+.api-docs { display: flex; flex-direction: column; gap: 1.5rem; }
+
+.method {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    font-family: monospace;
+}
+
+.method.get  { background: rgba(63,185,80,0.15);  color: var(--green); }
+.method.post { background: rgba(88,166,255,0.15); color: var(--blue); }
+
+.api-example {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+}
+
+.api-example h3 {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.api-example pre {
+    font-family: monospace;
+    font-size: 0.85rem;
+    color: var(--text);
+    white-space: pre-wrap;
+    line-height: 1.7;
+}
+
+/* --- MISC --- */
+
+.msg {
+    color: var(--muted);
+    font-style: italic;
+    padding: 0.5rem 0;
+}
+
+hr { border: none; border-top: 1px solid var(--border); margin: 0.5rem 0; }

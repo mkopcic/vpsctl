@@ -5,7 +5,6 @@ import (
 
 	"github.com/mkopcic/vpsctl/internal/config"
 	"github.com/mkopcic/vpsctl/internal/output"
-	sshclient "github.com/mkopcic/vpsctl/internal/ssh"
 	"github.com/spf13/cobra"
 )
 
@@ -23,12 +22,12 @@ fi
 `
 
 var updateCmd = &cobra.Command{
-	Use:   "update [server|all]",
-	Short: "Run system update on one or more servers",
-	Args:  cobra.ExactArgs(1),
+	Use:          "update [server|all]",
+	Short:        "Run system update on one or more servers",
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
 
 	RunE: func(cmd *cobra.Command, args []string) error {
-
 		target := args[0]
 
 		cfg, err := config.Load()
@@ -42,28 +41,15 @@ var updateCmd = &cobra.Command{
 					continue
 				}
 				output.Info("updating %s...", server.Name)
-				return runOnServer(server, updateCmd_script)
+				runOnServer(server, updateCmd_script)
+				return nil
 			}
 			return fmt.Errorf("server not found: %s", target)
 		}
 
 		for _, server := range cfg.Servers {
 			output.Info("updating %s...", server.Name)
-			out, err := sshclient.RunCommand(
-				sshclient.Config{
-					User:     server.User,
-					Host:     server.Host,
-					Port:     server.Port,
-					Key:      server.Key,
-					Password: server.Password,
-				},
-				updateCmd_script,
-			)
-			if err != nil {
-				output.Fail("%s — %v", server.Name, err)
-				continue
-			}
-			output.OK("%s\n%s", server.Name, out)
+			runOnServer(server, updateCmd_script)
 		}
 
 		return nil

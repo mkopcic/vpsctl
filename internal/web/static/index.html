@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>vpsctl</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+    <div class="logo">&#x26A1; vpsctl</div>
+    <nav>
+        <button class="tab-btn active" data-tab="servers">Servers</button>
+        <button class="tab-btn" data-tab="exec">Execute</button>
+        <button class="tab-btn" data-tab="history">History</button>
+        <button class="tab-btn" data-tab="api">API</button>
+    </nav>
+</header>
+
+<main>
+
+    <!-- SERVERS TAB -->
+    <section id="tab-servers" class="tab active">
+        <div class="toolbar">
+            <h2>Servers</h2>
+            <button id="btn-ping" onclick="pingAll()">Ping All</button>
+        </div>
+        <div id="servers-wrap"><p class="msg">Loading...</p></div>
+    </section>
+
+    <!-- EXECUTE TAB -->
+    <section id="tab-exec" class="tab">
+        <div class="toolbar"><h2>Execute</h2></div>
+
+        <div class="exec-form">
+            <div class="form-row">
+                <label>Server</label>
+                <select id="exec-server">
+                    <option value="all">all (svi serveri)</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label>Command</label>
+                <input id="exec-cmd" type="text" placeholder="uptime" />
+            </div>
+            <button id="btn-exec" onclick="runExec()">Run</button>
+        </div>
+
+        <div id="exec-output" class="output hidden"></div>
+
+        <div class="divider"></div>
+
+        <!-- Quick actions — Update i Restart bez rucnog tipkanja komande -->
+        <div class="quick-actions">
+            <div class="quick-card">
+                <h3>Update</h3>
+                <div class="form-row">
+                    <label>Server</label>
+                    <select id="update-server"><option value="all">all</option></select>
+                </div>
+                <button onclick="runUpdate()">Run Update</button>
+            </div>
+
+            <div class="quick-card">
+                <h3>Restart Service</h3>
+                <div class="form-row">
+                    <label>Server</label>
+                    <select id="restart-server"><option value="all">all</option></select>
+                </div>
+                <div class="form-row">
+                    <label>Service</label>
+                    <input id="restart-service" type="text" placeholder="nginx" />
+                </div>
+                <button onclick="runRestart()">Restart</button>
+            </div>
+        </div>
+
+        <div id="action-output" class="output hidden"></div>
+    </section>
+
+    <!-- HISTORY TAB -->
+    <section id="tab-history" class="tab">
+        <div class="toolbar">
+            <h2>History</h2>
+            <div class="toolbar-right">
+                <select id="history-server"><option value="">all servers</option></select>
+                <input id="history-limit" type="number" value="20" min="1" max="500" />
+                <button onclick="loadHistory()">Refresh</button>
+            </div>
+        </div>
+        <div id="history-wrap"><p class="msg">Klikni Refresh za ucitavanje history-a.</p></div>
+    </section>
+
+    <!-- API DOCS TAB -->
+    <section id="tab-api" class="tab">
+        <div class="toolbar"><h2>API Reference</h2></div>
+        <div class="api-docs">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Method</th>
+                        <th>Endpoint</th>
+                        <th>Body / Params</th>
+                        <th>Opis</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><span class="method get">GET</span></td>
+                        <td>/servers</td>
+                        <td>—</td>
+                        <td>Lista svih servera (bez passworda)</td>
+                    </tr>
+                    <tr>
+                        <td><span class="method get">GET</span></td>
+                        <td>/servers/ping</td>
+                        <td>—</td>
+                        <td>TCP ping svih servera s latencijom</td>
+                    </tr>
+                    <tr>
+                        <td><span class="method post">POST</span></td>
+                        <td>/servers/exec</td>
+                        <td>{"server":"mellon","command":"uptime"}</td>
+                        <td>Izvrsi SSH komandu</td>
+                    </tr>
+                    <tr>
+                        <td><span class="method post">POST</span></td>
+                        <td>/servers/update</td>
+                        <td>{"server":"all"}</td>
+                        <td>System update (apt/yum/apk)</td>
+                    </tr>
+                    <tr>
+                        <td><span class="method post">POST</span></td>
+                        <td>/servers/restart</td>
+                        <td>{"server":"mellon","service":"nginx"}</td>
+                        <td>systemctl restart + is-active</td>
+                    </tr>
+                    <tr>
+                        <td><span class="method get">GET</span></td>
+                        <td>/jobs</td>
+                        <td>?server=mellon&amp;limit=20</td>
+                        <td>Job history iz SQLite baze</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="api-example">
+                <h3>curl primjeri</h3>
+                <pre>
+# Lista servera
+curl http://localhost:8080/servers
+
+# Ping svih
+curl http://localhost:8080/servers/ping
+
+# Exec na jednom serveru
+curl -X POST http://localhost:8080/servers/exec \
+  -H "Content-Type: application/json" \
+  -d '{"server":"mellon","command":"uptime"}'
+
+# Update svih servera
+curl -X POST http://localhost:8080/servers/update \
+  -H "Content-Type: application/json" \
+  -d '{"server":"all"}'
+
+# Restart servisa
+curl -X POST http://localhost:8080/servers/restart \
+  -H "Content-Type: application/json" \
+  -d '{"server":"mellon","service":"nginx"}'
+
+# Job history
+curl "http://localhost:8080/jobs?limit=10&server=mellon"
+                </pre>
+            </div>
+        </div>
+    </section>
+
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

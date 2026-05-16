@@ -26,7 +26,7 @@ go build -o vpsctl.exe .
 | `vpsctl update <server\|all>` | System update (apt/yum/apk) |
 | `vpsctl restart <server\|all> <servis>` | Restart systemd servisa |
 | `vpsctl history [server]` | Prikazi job history iz baze |
-| `vpsctl serve` | Pokreni HTTP API server (default port 8080) |
+| `vpsctl serve` | Pokreni HTTP API server + Web UI |
 
 ### Primjeri
 
@@ -38,7 +38,6 @@ vpsctl exec all "df -h"
 vpsctl update mellon
 vpsctl restart mellon nginx
 vpsctl history
-vpsctl history mellon
 vpsctl history mellon --limit 50
 vpsctl serve
 vpsctl serve --port 9000
@@ -46,48 +45,36 @@ vpsctl serve --port 9000
 
 ---
 
+## Web UI
+
+```bash
+vpsctl serve
+# otvori http://localhost:8080
+```
+
+Embedded u binary — nema eksternih fajlova. Cetiri taba:
+
+- **Servers** — tablica svih servera, Ping All s latencijama
+- **Execute** — SSH exec, Quick Update, Quick Restart
+- **History** — job history iz SQLite, filter po serveru
+- **API** — dokumentacija svih endpointa s curl primjerima
+
+---
+
 ## REST API
 
-Pokreni server:
-
-```bash
-vpsctl serve --port 8080
-```
-
-| Metoda | Endpoint | Opis |
-|---|---|---|
-| GET | `/servers` | Lista svih servera (bez passworda i kljuca) |
-| GET | `/servers/ping` | TCP ping svih servera s latencijom |
-| POST | `/servers/exec` | Izvrsi komandu na jednom ili svim serverima |
-| POST | `/servers/update` | System update (apt/yum/apk) |
-| POST | `/servers/restart` | Restart systemd servisa |
-
-### Primjeri
-
-```bash
-curl http://localhost:8080/servers
-curl http://localhost:8080/servers/ping
-
-curl -X POST http://localhost:8080/servers/exec \
-  -H "Content-Type: application/json" \
-  -d '{"server":"mellon","command":"uptime"}'
-
-curl -X POST http://localhost:8080/servers/update \
-  -H "Content-Type: application/json" \
-  -d '{"server":"all"}'
-
-curl -X POST http://localhost:8080/servers/restart \
-  -H "Content-Type: application/json" \
-  -d '{"server":"mellon","service":"nginx"}'
-```
+| Metoda | Endpoint | Body / Params | Opis |
+|---|---|---|---|
+| GET | `/servers` | — | Lista svih servera |
+| GET | `/servers/ping` | — | TCP ping s latencijom |
+| POST | `/servers/exec` | `{"server":"mellon","command":"uptime"}` | SSH exec |
+| POST | `/servers/update` | `{"server":"all"}` | System update |
+| POST | `/servers/restart` | `{"server":"mellon","service":"nginx"}` | Restart servisa |
+| GET | `/jobs` | `?server=mellon&limit=20` | Job history |
 
 ---
 
 ## Konfiguracija
-
-Serveri se definiraju u `configs/servers.yaml`.
-
-> `servers.yaml` nije na gitu. Koristi `servers.example.yaml` kao predlozak.
 
 ```yaml
 servers:
@@ -104,27 +91,43 @@ servers:
     key: C:/Users/ime/.ssh/id_rsa
 ```
 
+> `servers.yaml` nije na gitu. Koristi `servers.example.yaml` kao predlozak.
+
 ---
 
 ## Autentikacija
 
-1. SSH kljuc ako je `key:` definiran i postoji na disku
-2. Password iz YAML-a ako je `password:` definiran
-3. Interaktivni prompt ako nema ni jedno od gore navedenog
+1. SSH kljuc ako je `key:` definiran
+2. Password iz YAML-a
+3. Interaktivni prompt ako nema ni jedno
+
+---
+
+## Error handling
+
+Poznate greske se prevode u jasne poruke:
+
+| Greska sa servera | Prikazano |
+|---|---|
+| `Interactive authentication required` | nema sudo permisije |
+| `Unit X not found` | servis ne postoji na serveru |
+| `command not found` | komanda nije pronadjena |
+| `permission denied` | permission denied |
+
+Za sudo gresku — na serveru kao root:
+```bash
+echo "user ALL=(ALL) NOPASSWD: /bin/systemctl" >> /etc/sudoers.d/vpsctl
+```
 
 ---
 
 ## Logging i history
 
-Svaka operacija (exec, update, restart) sprema se na dva mjesta:
+- `logs/vpsctl.log` — plain text log svake operacije
+- `data/vpsctl.db` — SQLite, trajanje, source (cli/api)
 
-- `logs/vpsctl.log` — plain text, timestamp + output
-- `data/vpsctl.db` — SQLite baza, trajanje, source (cli/api)
-
-```
-vpsctl history
-[2026-05-16 14:00:54] [OK  ] mellon    1558ms — df -h /
-[2026-05-16 14:00:53] [OK  ] mellon    1133ms — uptime
+```bash
+vpsctl history mellon --limit 20
 ```
 
 ---
@@ -134,29 +137,24 @@ vpsctl history
 ```
 vpsctl/
 ├── cmd/
-│   ├── root.go
-│   ├── version.go
-│   ├── list.go
-│   ├── ping.go
-│   ├── exec.go
-│   ├── update.go
-│   ├── restart.go
-│   ├── history.go
-│   └── serve.go
+│   ├── root.go, version.go, list.go
+│   ├── ping.go, exec.go, update.go
+│   ├── restart.go, history.go, serve.go
 ├── internal/
 │   ├── config/config.go
 │   ├── ssh/ssh.go
 │   ├── output/output.go
 │   ├── logger/logger.go
-│   ├── store/
-│   │   ├── store.go   (DB init, sync.Once)
-│   │   └── job.go     (Job struct, Save, List)
-│   └── api/api.go
+│   ├── store/store.go + job.go
+│   ├── api/api.go
+│   └── web/
+│       ├── web.go
+│       └── static/ (index.html, style.css, app.js)
 ├── configs/
-│   ├── servers.yaml
+│   ├── servers.yaml (nije na gitu)
 │   └── servers.example.yaml
-├── data/              (nije na gitu)
-├── logs/              (nije na gitu)
+├── data/    (nije na gitu)
+├── logs/    (nije na gitu)
 └── main.go
 ```
 
@@ -166,9 +164,8 @@ vpsctl/
 
 - [x] Cobra CLI setup
 - [x] YAML config
-- [x] SSH exec jedan server
-- [x] SSH exec svi serveri paralelno
-- [x] Password + key + interaktivna autentikacija
+- [x] SSH exec + parallel
+- [x] Password + key + interaktivna auth
 - [x] TCP ping s latencijom
 - [x] Colored output
 - [x] Logging u fajl
@@ -177,6 +174,7 @@ vpsctl/
 - [x] vpsctl restart
 - [x] REST API (Gin)
 - [x] SQLite job history
-- [x] vpsctl history
-- [ ] vpsctl ssh - interaktivni shell
+- [x] Web GUI (embed)
+- [x] Error handling (SilenceUsage, friendlyError)
 - [ ] Docker deploy
+- [ ] vpsctl ssh — interaktivni shell

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +20,10 @@ var execCmd = &cobra.Command{
 	Short: "Execute command on one or more servers",
 	Args:  cobra.ExactArgs(2),
 
+	// SilenceUsage sprjecava Cobru da prikaze Usage kad SSH komanda faila
+	// SSH execution failure nije usage greska — Usage bi zbunjivao korisnika
+	SilenceUsage: true,
+
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target := args[0]
 		command := args[1]
@@ -33,12 +38,12 @@ var execCmd = &cobra.Command{
 				if server.Name != target {
 					continue
 				}
-				return runOnServer(server, command)
+				runOnServer(server, command)
+				return nil
 			}
 			return fmt.Errorf("server not found: %s", target)
 		}
 
-		// Svi serveri paralelno
 		var wg sync.WaitGroup
 		for _, server := range cfg.Servers {
 			wg.Add(1)
@@ -53,9 +58,10 @@ var execCmd = &cobra.Command{
 }
 
 // runOnServer izvrsava SSH komandu na jednom serveru.
-// Koriste ga exec, update i restart komande — centralno mjesto za SSH + log + DB.
-func runOnServer(server config.Server, command string) error {
-	start := time.Now() // za mjerenje trajanja
+// Ne vraca error Cobri — sama handla prikaz OK/FAIL + log + DB.
+// SSH execution failure nije razlog za prikaz Usage.
+func runOnServer(server config.Server, command string) {
+	start := time.Now()
 
 	out, err := sshclient.RunCommand(sshclient.Config{
 		User:     server.User,
@@ -70,17 +76,42 @@ func runOnServer(server config.Server, command string) error {
 	if err != nil {
 		job.Error = err.Error()
 	}
-	store.Save(job) // greska pri loggingu ne prekida main flow
+	store.Save(job)
 
 	if err != nil {
-		output.Fail("%s — %v", server.Name, err)
-		logger.Log(server.Name, command, "FAIL: "+err.Error())
-		return err
+		// Prepoznaj poznate greske i daj jasnu poruku
+		msg := friendlyError(out, err.Error())
+		output.Fail("%s — %s", server.Name, msg)
+		if out != "" {
+			fmt.Print(out)
+		}
+		logger.Log(server.Name, command, "FAIL: "+msg+" | "+out)
+		return
 	}
 
 	output.OK("%s\n%s", server.Name, out)
 	logger.Log(server.Name, command, out)
-	return nil
+}
+
+// friendlyError prepoznaje poznate sistemske greske i vraca jasnu poruku.
+// serverOutput je stdout/stderr sa servera, sshErr je Go SSH error string.
+func friendlyError(serverOutput, sshErr string) string {
+	o := strings.ToLower(serverOutput)
+
+	switch {
+	case strings.Contains(o, "interactive authentication required"):
+		return "nema sudo permisije — dodaj NOPASSWD u sudoers za ovog usera"
+	case strings.Contains(o, "unit") && strings.Contains(o, "not found"):
+		return "servis ne postoji na ovom serveru"
+	case strings.Contains(o, "not found") || strings.Contains(o, "not recognized"):
+		return "komanda nije pronadjena na serveru"
+	case strings.Contains(o, "permission denied"):
+		return "permission denied"
+	case strings.Contains(o, "failed to connect") || strings.Contains(o, "connection refused"):
+		return "konekcija odbijena"
+	default:
+		return sshErr
+	}
 }
 
 func init() {

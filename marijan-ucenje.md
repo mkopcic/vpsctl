@@ -64,9 +64,9 @@ Na temelju originalnog plana i svega sto smo radili zajedno.
 - [x] JSON binding (ShouldBindJSON, binding:"required")
 - [x] JSON response (c.JSON, http.StatusOK)
 - [x] omitempty u struct tagovima
-- [x] vpsctl serve --port flag
 - [x] GET /servers, /servers/ping
 - [x] POST /servers/exec, /update, /restart
+- [x] GET /jobs?server=&limit= (za web GUI)
 
 ---
 
@@ -77,37 +77,54 @@ Na temelju originalnog plana i svega sto smo radili zajedno.
 - [x] sync.Once za singleton DB konekciju
 - [x] PRAGMA journal_mode=WAL
 - [x] CREATE TABLE IF NOT EXISTS
-- [x] INSERT, SELECT, Scan u Go-u
-- [x] bool -> int konverzija (SQLite nema bool)
-- [x] internal/store/store.go — DB init
-- [x] internal/store/job.go — Job struct, Save, List, ListByServer
+- [x] INSERT, SELECT, Scan
+- [x] bool -> int konverzija (SQLite nema bool tip)
+- [x] internal/store/store.go + job.go
 - [x] vpsctl history [server] --limit
 - [x] duration_ms mjerenje po operaciji
-- [x] source="cli" vs source="api" razlikovanje
+- [x] source="cli" vs source="api"
 
 ---
 
-## Bonus (nije u originalnom planu)
+## Tjedan 8 - Web GUI + Error Handling GOTOVO
 
-- [x] vpsctl update — apt/yum/apk auto detektira
-- [x] vpsctl restart — systemctl + is-active provjera
-- [x] Colored output — [OK]/[FAIL]/[INFO]
-- [x] IPv6 fix — net.JoinHostPort
-- [x] servers.example.yaml + .gitignore
+### Go embed package
+- [x] //go:embed direktiva — kompajler pakira staticke fajlove u binary
+- [x] embed.FS tip
+- [x] fs.Sub za stripanje path prefixa
+- [x] http.FileSystem interface za Gin StaticFS
+- [x] Jedan binary ima sve — Go kod + HTML + CSS + JS
+
+### Web UI (vanilla JS)
+- [x] Servers tab — tablica + Ping All s latencijama i bojama
+- [x] Execute tab — exec forma + Quick Update/Restart
+- [x] History tab — job history iz SQLite, filter po serveru
+- [x] API tab — dokumentacija svih endpointa s curl primjerima
+- [x] Redirect / -> /ui/ u serve.go
+- [x] escapeHtml() za XSS zastitu u JS-u
+
+### Error handling refaktor
+- [x] SilenceUsage: true — Cobra ne pokazuje Usage za SSH runtime greske
+- [x] runOnServer je void — ne vraca error Cobri, handla prikaz sam
+- [x] friendlyError() — mapa poznatih gresaka na jasne poruke:
+      - "Interactive authentication required" -> nema sudo permisije
+      - "Unit X not found" -> servis ne postoji
+      - "command not found" -> komanda nije pronadjena
+      - "permission denied" -> permission denied
 
 ---
 
-## Tjedan 8 - Docker (sljedece)
+## Tjedan 9 - Docker (sljedece)
 
 ### Plan:
-- Dockerfile za Go binary (multi-stage build)
-- Docker compose
+- Dockerfile — multi-stage build (builder + minimal image)
+- Volume mountanje za data/ i configs/
 - Deploy na Hetzner
 
 ### Sto treba nauciti:
-- Multi-stage Dockerfile (builder + minimal image)
-- Kako Go binary radi u containeru
-- Volume mountanje za data/ i configs/
+- Multi-stage Dockerfile u Go-u
+- Kako Go binary radi u Alpine containeru
+- docker-compose.yml za vpsctl
 
 ---
 
@@ -133,7 +150,7 @@ Na temelju originalnog plana i svega sto smo radili zajedno.
 | Koncept | Status | Gdje |
 |---|---|---|
 | package, func, struct | GOTOVO | cijeli projekt |
-| error handling | GOTOVO | RunE, return err |
+| error handling | GOTOVO | RunE, SilenceUsage, friendlyError |
 | goroutines + WaitGroup | GOTOVO | exec all, ping |
 | goroutine + select + channel | GOTOVO | SSH timeout |
 | net.DialTimeout, JoinHostPort | GOTOVO | ping |
@@ -144,7 +161,8 @@ Na temelju originalnog plana i svega sto smo radili zajedno.
 | JSON bind/response | GOTOVO | API handleri |
 | database/sql + SQLite | GOTOVO | store/ |
 | sync.Once (singleton) | GOTOVO | store/store.go |
-| PRAGMA, WAL mode | GOTOVO | SQLite optimizacija |
+| embed.FS | GOTOVO | internal/web/web.go |
+| fs.Sub + http.FileSystem | GOTOVO | web GUI serving |
 | interfaces | DJELOMICNO | ssh.AuthMethod |
 | pointers | DJELOMICNO | &cobra.Command |
-| Docker | NIJE POCETO | tjedan 8 |
+| Docker | NIJE POCETO | tjedan 9 |
