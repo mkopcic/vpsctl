@@ -1,4 +1,6 @@
-vpsctl.exe
+*.exe
+*.exe~
 configs/servers.yaml
 logs/
 data/
+.claude/worktrees/
