@@ -4,6 +4,10 @@ servers:
     port: 22
     user: root
     key: C:/Users/yourname/.ssh/id_rsa
+    # domene za `vpsctl certs`
+    domains:
+      - example.com
+      - www.example.com
 
   - name: my-server-password
     host: example2.com

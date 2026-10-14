@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -27,18 +28,23 @@ var execCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target := args[0]
 		command := args[1]
+		timeout, _ := cmd.Flags().GetDuration("timeout")
 
 		cfg, err := config.Load()
 		if err != nil {
 			return err
 		}
 
+		// Jedan timeout za cijelu operaciju — i za "all"
+		ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+		defer cancel()
+
 		if target != "all" {
 			for _, server := range cfg.Servers {
 				if server.Name != target {
 					continue
 				}
-				runOnServer(server, command)
+				runOnServer(ctx, server, command)
 				return nil
 			}
 			return fmt.Errorf("server not found: %s", target)
@@ -49,7 +55,7 @@ var execCmd = &cobra.Command{
 			wg.Add(1)
 			go func(server config.Server) {
 				defer wg.Done()
-				runOnServer(server, command)
+				runOnServer(ctx, server, command)
 			}(server)
 		}
 		wg.Wait()
@@ -57,19 +63,25 @@ var execCmd = &cobra.Command{
 	},
 }
 
-// runOnServer izvrsava SSH komandu na jednom serveru.
-// Ne vraca error Cobri — sama handla prikaz OK/FAIL + log + DB.
-// SSH execution failure nije razlog za prikaz Usage.
-func runOnServer(server config.Server, command string) {
-	start := time.Now()
-
-	out, err := sshclient.RunCommand(sshclient.Config{
+// sshConfig prevodi server iz YAML-a u SSH config
+func sshConfig(server config.Server) sshclient.Config {
+	return sshclient.Config{
 		User:     server.User,
 		Host:     server.Host,
 		Port:     server.Port,
 		Key:      server.Key,
 		Password: server.Password,
-	}, command)
+	}
+}
+
+// runOnServer izvrsava SSH komandu na jednom serveru.
+// Ne vraca error Cobri — sama handla prikaz OK/FAIL + log + DB.
+// SSH execution failure nije razlog za prikaz Usage.
+func runOnServer(ctx context.Context, server config.Server, command string) {
+	start := time.Now()
+
+	res, err := sshclient.RunCommand(ctx, sshConfig(server), command)
+	out := res.Output()
 
 	// Spremi u SQLite bez obzira na uspjeh/neuspjeh
 	job := store.NewJob(server.Name, command, out, "", "cli", err == nil, start)
@@ -115,5 +127,6 @@ func friendlyError(serverOutput, sshErr string) string {
 }
 
 func init() {
+	execCmd.Flags().Duration("timeout", 30*time.Second, "Max trajanje komande (npr. 30s, 5m)")
 	rootCmd.AddCommand(execCmd)
 }

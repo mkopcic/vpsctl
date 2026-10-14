@@ -1,4 +1,4 @@
-﻿package output
+package output
 
 import "fmt"
 
@@ -15,6 +15,10 @@ func OK(format string, args ...any) {
 
 func Fail(format string, args ...any) {
 	fmt.Printf(red+"[FAIL]"+reset+" "+format+"\n", args...)
+}
+
+func Warn(format string, args ...any) {
+	fmt.Printf(yellow+"[WARN]"+reset+" "+format+"\n", args...)
 }
 
 func Info(format string, args ...any) {

@@ -9,10 +9,22 @@ type Server struct {
 	User     string `mapstructure:"user"`
 	Key      string `mapstructure:"key"`
 	Password string `mapstructure:"password"`
+	// Domains se koriste za `vpsctl certs` (provjera TLS certifikata)
+	Domains []string `mapstructure:"domains"`
 }
 
 type Config struct {
 	Servers []Server `mapstructure:"servers"`
+}
+
+// Find vraca server po imenu. ok=false ako ne postoji.
+func (c *Config) Find(name string) (Server, bool) {
+	for _, s := range c.Servers {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return Server{}, false
 }
 
 func Load() (*Config, error) {

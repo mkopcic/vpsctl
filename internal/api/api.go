@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -35,11 +37,19 @@ type RestartRequest struct {
 // Svaki handler vraca listu ovih, jedan po serveru
 
 type ServerResult struct {
-	Server string `json:"server"`
-	Output string `json:"output"`
-	OK     bool   `json:"ok"`
-	Error  string `json:"error,omitempty"` // omitempty = ne pojavljuje se u JSON-u ako je prazan
+	Server   string `json:"server"`
+	Output   string `json:"output"`
+	OK       bool   `json:"ok"`
+	ExitCode int    `json:"exit_code"`
+	Error    string `json:"error,omitempty"` // omitempty = ne pojavljuje se u JSON-u ako je prazan
 }
+
+// Timeouti po vrsti operacije — isti defaulti kao CLI flagovi
+const (
+	execTimeout    = 30 * time.Second
+	updateTimeout  = 15 * time.Minute
+	restartTimeout = time.Minute
+)
 
 // updateScript detektira package manager automatski
 const updateScript = `
@@ -160,7 +170,7 @@ func execCommand(c *gin.Context) {
 		return
 	}
 
-	results := runOnTargets(cfg, req.Server, req.Command)
+	results := runOnTargets(c.Request.Context(), cfg, req.Server, req.Command, execTimeout)
 	c.JSON(http.StatusOK, results)
 }
 
@@ -180,7 +190,7 @@ func updateServers(c *gin.Context) {
 		return
 	}
 
-	results := runOnTargets(cfg, req.Server, updateScript)
+	results := runOnTargets(c.Request.Context(), cfg, req.Server, updateScript, updateTimeout)
 	c.JSON(http.StatusOK, results)
 }
 
@@ -201,7 +211,7 @@ func restartService(c *gin.Context) {
 	}
 
 	command := fmt.Sprintf("systemctl restart %s && systemctl is-active %s", req.Service, req.Service)
-	results := runOnTargets(cfg, req.Server, command)
+	results := runOnTargets(c.Request.Context(), cfg, req.Server, command, restartTimeout)
 	c.JSON(http.StatusOK, results)
 }
 
@@ -209,7 +219,8 @@ func restartService(c *gin.Context) {
 
 // runOnTargets izvrsava komandu na jednom serveru ili svima ("all").
 // Mjeri trajanje, logira u fajl i sprema u SQLite s source="api".
-func runOnTargets(cfg *config.Config, target, command string) []ServerResult {
+// ctx je context HTTP requesta — ako klijent prekine request, prekida se i SSH.
+func runOnTargets(ctx context.Context, cfg *config.Config, target, command string, timeout time.Duration) []ServerResult {
 	var results []ServerResult
 
 	for _, s := range cfg.Servers {
@@ -220,23 +231,34 @@ func runOnTargets(cfg *config.Config, target, command string) []ServerResult {
 
 		start := time.Now()
 
-		out, err := sshclient.RunCommand(sshclient.Config{
+		runCtx, cancel := context.WithTimeout(ctx, timeout)
+		res, err := sshclient.RunCommand(runCtx, sshclient.Config{
 			User:     s.User,
 			Host:     s.Host,
 			Port:     s.Port,
 			Key:      s.Key,
 			Password: s.Password,
 		}, command)
+		cancel()
+		out := res.Output()
 
 		// Spremi u SQLite — source="api" da razlikujemo od CLI poziva
 		job := store.NewJob(s.Name, command, out, "", "api", err == nil, start)
 		if err != nil {
 			job.Error = err.Error()
 			store.Save(job)
+
+			// Exit code postoji samo ako je komanda stvarno pokrenuta
+			exitCode := -1
+			if exitErr, ok := errors.AsType[*sshclient.ExitError](err); ok {
+				exitCode = exitErr.Code
+			}
 			results = append(results, ServerResult{
-				Server: s.Name,
-				OK:     false,
-				Error:  err.Error(),
+				Server:   s.Name,
+				Output:   out,
+				OK:       false,
+				ExitCode: exitCode,
+				Error:    err.Error(),
 			})
 		} else {
 			store.Save(job)
