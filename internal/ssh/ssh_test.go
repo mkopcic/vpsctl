@@ -242,6 +242,38 @@ func TestClient_ReusesConnection(t *testing.T) {
 	}
 }
 
+// TestDial_PromptPausesDeadline: korisnik tipka password dulje od dialTimeout.
+// Bez pauseDeadline handshake pada s "i/o timeout" (bug s mellon-dev).
+func TestDial_PromptPausesDeadline(t *testing.T) {
+	srv := trusted(t)
+
+	old := dialTimeout
+	dialTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { dialTimeout = old })
+
+	kh, err := loadKnownHosts()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hs := &handshake{}
+	clientConfig := &ssh.ClientConfig{
+		User: srv.cfg.User,
+		Auth: []ssh.AuthMethod{ssh.PasswordCallback(func() (string, error) {
+			hs.pauseDeadline()
+			time.Sleep(3 * dialTimeout) // "korisnik" sporo tipka
+			return srv.cfg.Password, nil
+		})},
+		HostKeyCallback: kh.check,
+	}
+
+	conn, err := dial(t.Context(), srv.cfg.addr(), clientConfig, kh, hs)
+	if err != nil {
+		t.Fatalf("handshake pao dok je korisnik tipkao: %v", err)
+	}
+	conn.Close()
+}
+
 func TestDial_UnknownHost(t *testing.T) {
 	useKnownHosts(t)
 	srv := startServer(t)

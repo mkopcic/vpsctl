@@ -174,7 +174,7 @@ func FetchHostKey(ctx context.Context, cfg Config) (*HostKey, error) {
 	}
 
 	// nil umjesto kh — ne zelimo da dial suzi algoritme na vec poznate
-	conn, err := dial(ctx, cfg.addr(), clientConfig, nil)
+	conn, err := dial(ctx, cfg.addr(), clientConfig, nil, nil)
 	if conn != nil {
 		conn.Close()
 	}

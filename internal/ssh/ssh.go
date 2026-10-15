@@ -15,9 +15,11 @@ import (
 	"golang.org/x/term"
 )
 
-// dialTimeout vrijedi za TCP connect + SSH handshake (kex + auth).
+// dialTimeout vrijedi za TCP connect + SSH handshake (kex + auth), bez
+// vremena koje korisnik provede tipkajuci password (vidi pauseDeadline).
 // Trajanje same komande kontrolira context koji salje pozivatelj.
-const dialTimeout = 10 * time.Second
+// var, a ne const, da ga test moze skratiti.
+var dialTimeout = 10 * time.Second
 
 type Config struct {
 	User     string
@@ -68,26 +70,47 @@ func Dial(ctx context.Context, cfg Config) (*Client, error) {
 		return nil, err
 	}
 
+	hs := &handshake{}
 	clientConfig := &ssh.ClientConfig{
 		User:            cfg.User,
-		Auth:            buildAuth(cfg),
+		Auth:            buildAuth(cfg, hs.pauseDeadline),
 		HostKeyCallback: kh.check,
 	}
 
-	conn, err := dial(ctx, cfg.addr(), clientConfig, kh)
+	conn, err := dial(ctx, cfg.addr(), clientConfig, kh, hs)
 	if err != nil {
 		return nil, err
 	}
 	return &Client{conn: conn}, nil
 }
 
+// handshake povezuje auth callbackove sa socketom koji ce dial tek otvoriti.
+// Auth metode se slazu prije dialanja, a interaktivni prompt mora moci
+// ukloniti deadline na socketu — inace korisnik ima 10s da upise password.
+type handshake struct {
+	conn net.Conn
+}
+
+// pauseDeadline uklanja deadline prije cekanja na korisnika.
+// Context (timeout komande, Ctrl+C) i dalje vrijedi.
+func (h *handshake) pauseDeadline() {
+	if h.conn != nil {
+		h.conn.SetDeadline(time.Time{})
+	}
+}
+
 // dial je zajednicki dio za Dial i FetchHostKey.
 // Ako je kh zadan, HostKeyAlgorithms se suzi na tipove kljuceva koje vec znamo.
-func dial(ctx context.Context, addr string, clientConfig *ssh.ClientConfig, kh *knownHosts) (*ssh.Client, error) {
+// hs (moze biti nil) dobiva socket da bi prompt mogao pauzirati deadline.
+func dial(ctx context.Context, addr string, clientConfig *ssh.ClientConfig, kh *knownHosts, hs *handshake) (*ssh.Client, error) {
 	d := net.Dialer{Timeout: dialTimeout}
 	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
+	}
+
+	if hs != nil {
+		hs.conn = conn
 	}
 
 	if kh != nil {
@@ -172,7 +195,9 @@ func RunCommand(ctx context.Context, cfg Config, command string) (Result, error)
 	return client.Run(ctx, command)
 }
 
-func buildAuth(cfg Config) []ssh.AuthMethod {
+// buildAuth slaze auth metode. beforePrompt se zove prije svakog
+// interaktivnog upisa passworda (pauzira deadline handshakea).
+func buildAuth(cfg Config, beforePrompt func()) []ssh.AuthMethod {
 	var methods []ssh.AuthMethod
 
 	if cfg.Key != "" {
@@ -194,12 +219,14 @@ func buildAuth(cfg Config) []ssh.AuthMethod {
 
 	if cfg.Password == "" {
 		methods = append(methods, ssh.PasswordCallback(func() (string, error) {
+			beforePrompt()
 			fmt.Printf("Password for %s@%s: ", cfg.User, cfg.Host)
 			raw, err := term.ReadPassword(int(syscall.Stdin))
 			fmt.Println()
 			return string(raw), err
 		}))
 		methods = append(methods, ssh.KeyboardInteractive(func(user, instruction string, questions []string, echos []bool) ([]string, error) {
+			beforePrompt()
 			fmt.Printf("Password for %s@%s: ", cfg.User, cfg.Host)
 			raw, err := term.ReadPassword(int(syscall.Stdin))
 			fmt.Println()
