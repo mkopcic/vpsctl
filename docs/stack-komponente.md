@@ -7,9 +7,9 @@ to dovesti u red**.
 
 Veza s ostalim planovima:
 - `marijan-ucenje.md` — tjedni 1–7, osnove (gotovo)
-- `plan-tjedan-9-15.md` — Docker → Kubernetes. Ovaj dokument je **paralelna
-  grana**: Tjedan 0 (blokeri) vrijedi i ovdje, ostalo se može raditi
-  prije, poslije ili isprepleteno.
+- `plan-tjedan-9-15.md` — Docker → Kubernetes. Dva plana idu
+  **isprepleteno**, redoslijed je u tablici "Spojeni redoslijed" na vrhu tog
+  dokumenta. Tjedan 0 (blokeri, uključujući API auth) vrijedi i ovdje.
 
 Princip ostaje isti: svaka faza nosi **Go koncept** koji ti ionako nameće.
 
@@ -187,7 +187,13 @@ Gotenberg 8 ✓   supervisor ✓
 | 2 | `ssh.InsecureIgnoreHostKey()` | `internal/ssh/ssh.go` | Alat koji **instalira pakete kao root** ne smije prihvatiti bilo koji host. `knownhosts.New()`. |
 | 3 | Timeout preko `time.After`, nema `context` | `internal/ssh/ssh.go` | Install zna trajati minutama, a Ctrl+C mora prekinuti čisto. `RunCommand(ctx, ...)`. |
 | 4 | Samo `CombinedOutput` | `internal/ssh/ssh.go` | Detect treba odvojeno stdout / stderr / exit code. |
-| 5 | Relativni pathovi, nema testova | Tjedan 0 iz `plan-tjedan-9-15.md` | Isto vrijedi ovdje. |
+| 5 | Relativni pathovi | Tjedan 0 iz `plan-tjedan-9-15.md` | Isto vrijedi ovdje. |
+| 6 | CLI i API dupliciraju logiku (SSH + history + log) | `cmd/exec.go`, `internal/api/api.go` | Svaka nova operacija bi se pisala dvaput. Zajednički sloj (`internal/ops`) prije prve nove komande. API usput još koristi `RunCommand` (nova konekcija po komandi). |
+| 7 | `jobs` tablica = jedna komanda po retku | `internal/store/` | Deploy ima desetak koraka. Treba `runs` (jedan deploy/doctor) + `steps` (komanda, exit code, output, trajanje). |
+| 8 | Output stiže tek kad komanda završi | `internal/ssh/ssh.go`, API | Deploy traje minutama. `Run` treba varijantu s `io.Writer`, API ga streama u Web UI (SSE). |
+
+1–4 su riješeni (SSH refaktor + `vpsctl trust`). 6 ide prije Faze 1, 7 i 8
+prije Faze 3.
 
 ### Arhitektura — interfacei
 Ovo je mjesto gdje interfacei postaju **arhitektura**, a ne samo
@@ -209,7 +215,10 @@ type Result struct {
 type Panel interface {
     Name() string
     PHPBinary(app config.App) (string, error)
-    CreateDatabase(ctx context.Context, app config.App) error
+    DocRoot(ctx context.Context, app config.App) (string, error)
+    SetPHPVersion(ctx context.Context, app config.App, version string) (Plan, error)
+    ReloadFPM(ctx context.Context, app config.App) (Plan, error) // najviše se razlikuje CWP / Virtualmin
+    CreateDatabase(ctx context.Context, app config.App) (Plan, error)
 }
 
 // internal/stack — jedan recept
@@ -228,6 +237,15 @@ Zašto ovako:
   besplatan: ispiši plan. `--apply` ga izvrši. Isti plan ide u job history.
 - **Registry** komponenti: `map[string]Component`, svaka se registrira u
   `init()`. `requires: [node:22]` se parsira u `Requirement{Name:"node", Version:"22"}`.
+- **Panel metode koje mijenjaju server također vraćaju `Plan`** — isto
+  pravilo kao `Install`, pa dry-run vrijedi i za promjenu PHP verzije.
+
+### Opseg
+9 komponenti × 2 OS obitelji × 3 panela je previše da se sve napiše unaprijed.
+- **Detect** za sve komponente (jeftino, read-only, odmah korisno).
+- **Install** samo za ono što se stvarno ponavlja na mojim serverima; ostalo
+  ostaje ručno dok ne zaboli.
+- Panel adapter prvo za **Virtualmin** (najbolji CLI), CWP tek kad prvi radi.
 
 ### Struktura
 ```
@@ -271,6 +289,10 @@ rezultat (stdout/stderr/exit), table-driven testovi s fake hostom, `testdata/` f
 **Go koncepti:** `text/tabwriter`, `encoding/json`, worker pool (paralelni Detect po komponentama i serverima), `errgroup`.
 
 ### Faza 3 — app deploy / rollback
+Prije: preduvjeti 7 i 8 (runs + steps, streamanje outputa) i CI workflow koji
+gradi artefakt (`plan-tjedan-9-15.md`, Tjedan 10).
+
+- [ ] Sve komande appa idu **kao `panel_user`** (`sudo -u <panel_user> ...`), nikad kao root
 - [ ] `releases/<timestamp>`, `shared/` (`.env`, `storage/`, `database/`)
 - [ ] `composer check-platform-reqs` s PHP-om appa — prvi korak, staje ako padne
 - [ ] Artefakt iz GitHub Actionsa (assete se ne grade na serveru)
@@ -290,7 +312,9 @@ rezultat (stdout/stderr/exit), table-driven testovi s fake hostom, `testdata/` f
 **Go koncepti:** `io.Copy` i streamanje (dump ne smije ići kroz memoriju), port forwarding s goroutinama, cleanup na signal.
 
 ### Faza 5 — stack install recepti
-- [ ] Install + Verify za svaku komponentu, debian i rhel varijante
+Radi se **zadnja**, nakon Faze 6 i Kubernetesa (najveći rizik, najmanja korist).
+
+- [ ] Install + Verify samo za komponente koje se stvarno ponavljaju (vidi "Opseg")
 - [ ] Dry-run default, `--apply` za izvršavanje
 - [ ] Svaki install zapisan u job history s planom i outputom
 
@@ -308,6 +332,9 @@ rezultat (stdout/stderr/exit), table-driven testovi s fake hostom, `testdata/` f
 - Detect **nikad** ne mijenja server.
 - Install je **idempotentan** i po defaultu dry-run.
 - Nikad golo `php` — uvijek binary appa.
+- Composer, artisan i git uvijek **kao `panel_user`**, nikad kao root — inače
+  `storage/` i `vendor/` završe s krivim vlasnikom i app pada na prvom upisu.
+- `serve` mod nikad bez tokena i nikad na javnom sučelju.
 - Nikad dvije MySQL obitelji na istom serveru.
 - Nijedan servis (DB, Redis, Gotenberg, Adminer) ne sluša na javnoj adresi.
 - Svaka komponenta ima test s fake hostom prije nego što se pokrene na pravom serveru.

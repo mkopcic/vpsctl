@@ -8,24 +8,55 @@ korak ionako nameće. Kubernetes te tjera da napišeš bolji Go — to je poanta
 
 ---
 
+## Spojeni redoslijed (ovaj plan + `stack-komponente.md`)
+
+Dva plana se ne vode paralelno, nego isprepleteno. Svaki korak otključava
+sljedeći.
+
+| # | Korak | Iz kojeg plana | Zašto baš tada |
+|---|---|---|---|
+| 1 | Ostatak Tjedna 0 + API auth + zajednički sloj za CLI i API | ovaj | Malo posla, blokira sve ostalo. |
+| 2 | Faza 1–2: inventory, doctor, stack check | stack | Read-only, odmah korisno na pravim serverima. |
+| 3 | Tjedan 9–10: Docker + CI | ovaj | CI ionako treba za Fazu 3 (asseti se grade u GitHub Actionsu). Gotenberg = prva stvarna primjena Dockera na produkciji. |
+| 4 | Faza 3–4: deploy, rollback, db backup | stack | Treba CI artefakt iz koraka 3. |
+| 5 | Tjedan 11–15: Kubernetes na zasebnom k3s VPS-u | ovaj | vpsctl **i** jedan Laravel app u clusteru (vidi Tjedan 11). |
+| 6 | Faza 6 (audit) + Tjedan 14 (Prometheus) | oba | Periodični audit izlaže metrike, Grafana ih prikazuje. |
+| 7 | Faza 5: stack install recepti | stack | Najveći rizik, najmanja korist — zadnje. |
+
+---
+
 ## Tjedan 0 — blokeri prije Dockera
 
 Ovo nisu "nice to have". Svaki od njih ti razbije container.
 
-| # | Problem | Gdje | Zašto puca |
-|---|---|---|---|
-| 1 | `viper.AddConfigPath("./configs")` | `internal/config/config.go` | Relativan path. U containeru config dolazi iz volumea/ConfigMapa, ne iz `./configs`. Treba `VPSCTL_CONFIG` env override. |
-| 2 | `dbPath = "data/vpsctl.db"` | `internal/store/store.go` | Isto — relativan. SQLite mora na volume, inače gubiš history pri svakom restartu. |
-| 3 | `logFile = "logs/vpsctl.log"` | `internal/logger/logger.go` | U containeru logovi idu na **stdout**, ne u fajl. Fajl-log je anti-pattern za Docker/K8s. |
-| 4 | `return r.Run(addr)` | `cmd/serve.go` | Nema graceful shutdowna. K8s šalje SIGTERM → in-flight SSH exec se prekine nasred posla. |
-| 5 | `vpsctl.exe` + `vpsctl.exe~` su commitani | root repoa | ~78 MB binarnih fajlova u gitu. `.gitignore` ih lovi tek od sad, ali su već u historyju. |
+Stanje provjereno u kodu 12.11.2026.
+
+| # | Problem | Gdje | Zašto puca | Status |
+|---|---|---|---|---|
+| 1 | `viper.AddConfigPath("./configs")` | `internal/config/config.go` | Relativan path. U containeru config dolazi iz volumea/ConfigMapa, ne iz `./configs`. Treba `VPSCTL_CONFIG` env override. | otvoreno |
+| 2 | `dbPath = "data/vpsctl.db"` | `internal/store/store.go` | Isto — relativan. SQLite mora na volume, inače gubiš history pri svakom restartu. | otvoreno |
+| 3 | `logFile = "logs/vpsctl.log"` | `internal/logger/logger.go` | U containeru logovi idu na **stdout**, ne u fajl. Fajl-log je anti-pattern za Docker/K8s. | otvoreno |
+| 4 | `return r.Run(addr)` | `cmd/serve.go` | Nema graceful shutdowna. K8s šalje SIGTERM → in-flight SSH exec se prekine nasred posla. | otvoreno |
+| 5 | `vpsctl.exe` + `vpsctl.exe~` su commitani | root repoa | — | nije bilo točno: binarke nikad nisu ušle u history (repo ima ~50 KB) |
+| 6 | **API nema autentikaciju** | `internal/api/api.go`, `cmd/serve.go` | `POST /servers/exec` izvršava proizvoljnu naredbu na bilo kojem serveru, a `serve` sluša na svim sučeljima. Na javnom VPS-u to je otvoren RCE na sve servere. | otvoreno — **blokira svaki deploy `serve` moda** |
+| 7 | CLI i API dupliciraju logiku | `cmd/exec.go`, `cmd/update.go`, `internal/api/api.go` | Update skripta postoji dvaput; svaki sloj sam radi SSH + `store.Save` + log. Svaka nova operacija (deploy, doctor) bi se pisala dvaput. | otvoreno |
+
+Za #6:
+- [ ] Bearer token iz `VPSCTL_API_TOKEN`; bez tokena `serve` odbija startati osim na loopbacku
+- [ ] Default bind `127.0.0.1`, javno samo uz eksplicitni `--listen`
+- [ ] Pristup UI-ju kroz WireGuard ili SSH tunel, ne javni port
+- [ ] `serve` mod radi samo s SSH ključevima (interaktivni password prompt nema smisla bez terminala)
+
+Za #7:
+- [ ] Jedan paket (npr. `internal/ops`) s operacijama exec / update / restart koji radi SSH + history + log; `cmd/` i `internal/api/` ga samo zovu
 
 Dodatno, ne blokira Docker ali blokira produkciju:
-- `ssh.InsecureIgnoreHostKey()` u `internal/ssh/ssh.go` — MITM otvoren. Treba `knownhosts.New()`.
+- ~~`ssh.InsecureIgnoreHostKey()`~~ — riješeno (`known_hosts` + `vpsctl trust`).
 - Passwordi u plain YAML-u. U K8s to ide u Secret, ne u ConfigMap.
-- Nula testova. Prvi test piši u tjednu 9, ne "kasnije".
+- ~~Nula testova~~ — riješeno (`internal/ssh`, `internal/certs`, `cmd`). Fale još `internal/config` i `internal/store`.
+- `go.mod`: sve ovisnosti su označene `// indirect` → `go mod tidy`.
 
-**Gotovo kad:** binary radi iz bilo kojeg working directoryja, sve staze dolaze iz env varijabli s razumnim defaultima.
+**Gotovo kad:** binary radi iz bilo kojeg working directoryja, sve staze dolaze iz env varijabli s razumnim defaultima, a API bez tokena ne odgovara.
 
 ---
 
@@ -45,7 +76,10 @@ Jedan image, `docker run` radi, podaci prežive restart.
 - [ ] `docker-compose.yml` — volume za `data/`, bind-mount za `configs/`
 - [ ] HEALTHCHECK direktiva
 - [ ] Non-root user u imageu
-- [ ] Deploy na Hetzner, ostavi da radi tjedan dana
+- [ ] SSH ključ i `known_hosts` kao read-only mount, ne u imageu
+- [ ] Deploy na Hetzner, ostavi da radi tjedan dana — **tek nakon API autha
+      (Tjedan 0, #6)**, port objavljen samo na `127.0.0.1` / WireGuard sučelju
+- [ ] Gotenberg kao drugi servis u compose-u (`stack-komponente.md`, §6)
 
 ### Dockerfile — skica
 ```dockerfile
@@ -89,7 +123,8 @@ Push na `main` → image u GHCR-u, skeniran.
 - [ ] Push u `ghcr.io/mkopcic/vpsctl`, tagovi `:sha`, `:vX.Y.Z`, `:latest`
 - [ ] Trivy scan imagea, workflow pada na HIGH/CRITICAL
 - [ ] `gosec` na kodu
-- [ ] Prvi pravi testovi: `internal/config`, `friendlyError()`, `internal/store`
+- [ ] Testovi koji još fale: `internal/config`, `internal/store` (`friendlyError()`, `internal/ssh` i `internal/certs` već imaju)
+- [ ] Workflow za jedan Laravel app: `composer install --no-dev`, `npm run build`, artefakt (tar) koji Faza 3 deploya — vidi `stack-komponente.md`
 
 Trivy + gosec ti direktno pokrivaju "nemam formalni SAST/SCA tooling" rupu.
 Nakon ovog tjedna imaš konkretan odgovor.
@@ -116,15 +151,33 @@ Ne kreći od managed GKE/EKS — platit ćeš, a naučiti manje.
 - [ ] Secret za passworde, mountan kao env ili fajl
 - [ ] `imagePullSecret` za privatni GHCR
 
+### Druga traka: Laravel app u clusteru
+Sam vpsctl je tanka K8s vježba (jedna replika, SQLite, alat koji SSH-a prema
+van). Uz njega kroz tjedne 11–15 ide i jedan Laravel app
+(npr. `laravel-postgresql-demo`):
+
+- [ ] Image: FrankenPHP ili nginx + php-fpm, multi-stage (composer + node build)
+- [ ] Deployment za web, zaseban Deployment za `queue:work`
+- [ ] CronJob za `schedule:run`
+- [ ] Job za `migrate --force` prije rollouta
+- [ ] Postgres (StatefulSet ili CloudNativePG), Redis
+- [ ] `.env` → ConfigMap + Secret
+
+Ingress, TLS, probe, Helm chart i Argo CD iz sljedećih tjedana rade se na
+**oba** appa. Laravel app je onaj koji ide na javni Ingress.
+
 ### Gotovo kad
-`kubectl port-forward svc/vpsctl 8080:8080` i UI radi iz clustera.
+`kubectl port-forward svc/vpsctl 8080:8080` i UI radi iz clustera, a Laravel
+app odgovara na svom Serviceu.
 
 ---
 
 ## Tjedan 12 — Kubernetes: mreža i storage
 
 ### Taskovi
-- [ ] Ingress (k3s ima Traefik ugrađen) — `vpsctl.tvoja-domena.hr`
+- [ ] Ingress (k3s ima Traefik ugrađen) — za Laravel app. vpsctl **ne ide na
+      javni Ingress**: pod drži SSH pristup svim serverima, pa ostaje na
+      `port-forward` / WireGuard
 - [ ] cert-manager + Let's Encrypt, automatski TLS
 - [ ] PersistentVolumeClaim za SQLite (`local-path` provisioner)
 - [ ] **Deployment → StatefulSet** za SQLite, i razumjeti zašto: SQLite ne podnosi dva writera na isti fajl preko mreže. `replicas: 1` je ovdje jedini točan odgovor.
@@ -161,6 +214,9 @@ Ovaj tjedan je najviše vrijedan za infrastructure security smjer.
 - [ ] ServiceAccount + RBAC — Role, RoleBinding, princip najmanje privilegije
 - [ ] `securityContext`: `runAsNonRoot`, `readOnlyRootFilesystem`, `drop: [ALL]` capabilities
 - [ ] NetworkPolicy — default deny, pa eksplicitno otvoriti što treba
+      (vpsctl: egress samo na SSH portove servera iz `servers.yaml`)
+- [ ] Audit iz `stack-komponente.md` (Faza 6) kao metrike: dani do isteka
+      certifikata, PHP EOL, pending security updatei po serveru
 - [ ] Pod Security Standards (`restricted`)
 - [ ] Prometheus + Grafana (kube-prometheus-stack preko Helma)
 - [ ] `/metrics` endpoint u vpsctl-u — `prometheus/client_golang`, brojači za exec/update/restart, histogram trajanja
@@ -215,11 +271,12 @@ Ovo je i domena Rentlia — ako tamo prođe, ovaj projekt ti je najjači mogući
 
 | Koncept | Status | Kad |
 |---|---|---|
-| context.Context | nije počelo | tjedan 9 |
-| graceful shutdown | nije počelo | tjedan 9 |
-| env config / 12-factor | nije počelo | tjedan 9 |
-| testing, table-driven | nije počelo | tjedan 10 |
-| interfaces (pravi) | djelomično | tjedan 10 + channel manager |
+| context.Context | gotovo (SSH, CLI) | — |
+| graceful shutdown | nije počelo | tjedan 0 / 9 |
+| env config / 12-factor | nije počelo | tjedan 0 / 9 |
+| HTTP middleware (auth) | nije počelo | tjedan 0 |
+| testing, table-driven | gotovo (ssh, certs, cmd) | proširiti u tjednu 10 |
+| interfaces (pravi) | djelomično | Faza 1 (`Host`, `Panel`, `Component`) + channel manager |
 | log/slog | nije počelo | tjedan 14 |
 | Prometheus metrics | nije počelo | tjedan 14 |
 | errgroup, worker pool | nije počelo | channel manager |
