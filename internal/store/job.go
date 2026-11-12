@@ -4,15 +4,15 @@ import "time"
 
 // Job predstavlja jednu izvrsenu operaciju — jedan redak u bazi
 type Job struct {
-	ID         int64
-	Server     string
-	Command    string
-	Output     string
-	OK         bool
-	Error      string
-	DurationMs int64
-	Source     string // "cli" ili "api"
-	CreatedAt  string
+	ID         int64  `json:"id"`
+	Server     string `json:"server"`
+	Command    string `json:"command"`
+	Output     string `json:"output"`
+	OK         bool   `json:"ok"`
+	Error      string `json:"error,omitempty"`
+	DurationMs int64  `json:"duration_ms"`
+	Source     string `json:"source"` // "cli" ili "api"
+	CreatedAt  string `json:"created_at"`
 }
 
 // Save sprema jedan job u bazu.

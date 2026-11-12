@@ -33,28 +33,31 @@ Stanje provjereno u kodu 12.11.2026.
 
 | # | Problem | Gdje | Zašto puca | Status |
 |---|---|---|---|---|
-| 1 | `viper.AddConfigPath("./configs")` | `internal/config/config.go` | Relativan path. U containeru config dolazi iz volumea/ConfigMapa, ne iz `./configs`. Treba `VPSCTL_CONFIG` env override. | otvoreno |
-| 2 | `dbPath = "data/vpsctl.db"` | `internal/store/store.go` | Isto — relativan. SQLite mora na volume, inače gubiš history pri svakom restartu. | otvoreno |
-| 3 | `logFile = "logs/vpsctl.log"` | `internal/logger/logger.go` | U containeru logovi idu na **stdout**, ne u fajl. Fajl-log je anti-pattern za Docker/K8s. | otvoreno |
-| 4 | `return r.Run(addr)` | `cmd/serve.go` | Nema graceful shutdowna. K8s šalje SIGTERM → in-flight SSH exec se prekine nasred posla. | otvoreno |
+| 1 | `viper.AddConfigPath("./configs")` | `internal/config/config.go` | Relativan path. U containeru config dolazi iz volumea/ConfigMapa, ne iz `./configs`. Treba `VPSCTL_CONFIG` env override. | riješeno (`VPSCTL_CONFIG`) |
+| 2 | `dbPath = "data/vpsctl.db"` | `internal/store/store.go` | Isto — relativan. SQLite mora na volume, inače gubiš history pri svakom restartu. | riješeno (`VPSCTL_DATA`) |
+| 3 | `logFile = "logs/vpsctl.log"` | `internal/logger/logger.go` | U containeru logovi idu na **stdout**, ne u fajl. Fajl-log je anti-pattern za Docker/K8s. | riješeno (`serve` → stdout, CLI ostaje na fajlu; `VPSCTL_LOG_FILE`) |
+| 4 | `return r.Run(addr)` | `cmd/serve.go` | Nema graceful shutdowna. K8s šalje SIGTERM → in-flight SSH exec se prekine nasred posla. | riješeno (`http.Server` + `Shutdown`, 25 s) |
 | 5 | `vpsctl.exe` + `vpsctl.exe~` su commitani | root repoa | — | nije bilo točno: binarke nikad nisu ušle u history (repo ima ~50 KB) |
-| 6 | **API nema autentikaciju** | `internal/api/api.go`, `cmd/serve.go` | `POST /servers/exec` izvršava proizvoljnu naredbu na bilo kojem serveru, a `serve` sluša na svim sučeljima. Na javnom VPS-u to je otvoren RCE na sve servere. | otvoreno — **blokira svaki deploy `serve` moda** |
-| 7 | CLI i API dupliciraju logiku | `cmd/exec.go`, `cmd/update.go`, `internal/api/api.go` | Update skripta postoji dvaput; svaki sloj sam radi SSH + `store.Save` + log. Svaka nova operacija (deploy, doctor) bi se pisala dvaput. | otvoreno |
+| 6 | **API nema autentikaciju** | `internal/api/api.go`, `cmd/serve.go` | `POST /servers/exec` izvršava proizvoljnu naredbu na bilo kojem serveru, a `serve` sluša na svim sučeljima. Na javnom VPS-u to je otvoren RCE na sve servere. | riješeno (token uvijek obavezan) |
+| 7 | CLI i API dupliciraju logiku | `cmd/exec.go`, `cmd/update.go`, `internal/api/api.go` | Update skripta postoji dvaput; svaki sloj sam radi SSH + `store.Save` + log. Svaka nova operacija (deploy, doctor) bi se pisala dvaput. | riješeno (`internal/ops`) |
 
 Za #6:
-- [ ] Bearer token iz `VPSCTL_API_TOKEN`; bez tokena `serve` odbija startati osim na loopbacku
-- [ ] Default bind `127.0.0.1`, javno samo uz eksplicitni `--listen`
-- [ ] Pristup UI-ju kroz WireGuard ili SSH tunel, ne javni port
-- [ ] `serve` mod radi samo s SSH ključevima (interaktivni password prompt nema smisla bez terminala)
+- [x] Bearer token iz `VPSCTL_API_TOKEN`. Bez njega: na loopbacku se generira
+      novi pri svakom startu, na bilo kojoj drugoj adresi `serve` odbija startati.
+      Token je obavezan i na localhostu — inače bi bilo koja web stranica u
+      browseru mogla poslati POST na `127.0.0.1:8080/servers/exec`.
+- [x] Default bind `127.0.0.1`, javno samo uz eksplicitni `--listen` / `VPSCTL_LISTEN`
+- [ ] Pristup UI-ju kroz WireGuard ili SSH tunel, ne javni port (promet je HTTP)
+- [x] `serve` mod nema interaktivni password prompt (ključ ili password iz YAML-a)
 
 Za #7:
-- [ ] Jedan paket (npr. `internal/ops`) s operacijama exec / update / restart koji radi SSH + history + log; `cmd/` i `internal/api/` ga samo zovu
+- [x] `internal/ops`: `Runner.Run` radi SSH + history + log; `cmd/` i `internal/api/` ga samo zovu
 
 Dodatno, ne blokira Docker ali blokira produkciju:
 - ~~`ssh.InsecureIgnoreHostKey()`~~ — riješeno (`known_hosts` + `vpsctl trust`).
 - Passwordi u plain YAML-u. U K8s to ide u Secret, ne u ConfigMap.
-- ~~Nula testova~~ — riješeno (`internal/ssh`, `internal/certs`, `cmd`). Fale još `internal/config` i `internal/store`.
-- `go.mod`: sve ovisnosti su označene `// indirect` → `go mod tidy`.
+- ~~Nula testova~~ — riješeno (`ssh`, `certs`, `cmd`, `config`, `store`, `api`, `ops`).
+- ~~`go.mod`: sve ovisnosti označene `// indirect`~~ — riješeno (`go mod tidy`).
 
 **Gotovo kad:** binary radi iz bilo kojeg working directoryja, sve staze dolaze iz env varijabli s razumnim defaultima, a API bez tokena ne odgovara.
 
@@ -66,10 +69,10 @@ Dodatno, ne blokira Docker ali blokira produkciju:
 Jedan image, `docker run` radi, podaci prežive restart.
 
 ### Taskovi
-- [ ] Refaktor staza iz Tjedna 0 → `VPSCTL_CONFIG`, `VPSCTL_DATA`, `VPSCTL_PORT`
-- [ ] Logger piše na stdout (fajl samo ako je `VPSCTL_LOG_FILE` postavljen)
-- [ ] Graceful shutdown u `serve.go` — `http.Server` + `signal.NotifyContext` + `srv.Shutdown(ctx)`
-- [ ] `/healthz` endpoint (uvijek 200) i `/readyz` (200 tek kad je DB otvorena)
+- [x] Refaktor staza iz Tjedna 0 → `VPSCTL_CONFIG`, `VPSCTL_DATA`, `VPSCTL_PORT`, `VPSCTL_LISTEN`
+- [x] Logger u `serve` modu piše na stdout (fajl samo ako je `VPSCTL_LOG_FILE` postavljen)
+- [x] Graceful shutdown u `serve.go` — `http.Server` + `signal.NotifyContext` + `srv.Shutdown(ctx)`
+- [x] `/healthz` endpoint (uvijek 200) i `/readyz` (200 tek kad je DB otvorena)
 - [ ] `.dockerignore` — `.git`, `*.exe`, `logs/`, `data/`, `configs/servers.yaml`
 - [ ] Multi-stage `Dockerfile`
 - [ ] Verzija kroz ldflags umjesto `const Version` — `-X github.com/mkopcic/vpsctl/cmd.Version=$(git describe --tags)`
@@ -123,7 +126,7 @@ Push na `main` → image u GHCR-u, skeniran.
 - [ ] Push u `ghcr.io/mkopcic/vpsctl`, tagovi `:sha`, `:vX.Y.Z`, `:latest`
 - [ ] Trivy scan imagea, workflow pada na HIGH/CRITICAL
 - [ ] `gosec` na kodu
-- [ ] Testovi koji još fale: `internal/config`, `internal/store` (`friendlyError()`, `internal/ssh` i `internal/certs` već imaju)
+- [x] Testovi za `internal/config` i `internal/store`
 - [ ] Workflow za jedan Laravel app: `composer install --no-dev`, `npm run build`, artefakt (tar) koji Faza 3 deploya — vidi `stack-komponente.md`
 
 Trivy + gosec ti direktno pokrivaju "nemam formalni SAST/SCA tooling" rupu.
@@ -272,10 +275,10 @@ Ovo je i domena Rentlia — ako tamo prođe, ovaj projekt ti je najjači mogući
 | Koncept | Status | Kad |
 |---|---|---|
 | context.Context | gotovo (SSH, CLI) | — |
-| graceful shutdown | nije počelo | tjedan 0 / 9 |
-| env config / 12-factor | nije počelo | tjedan 0 / 9 |
-| HTTP middleware (auth) | nije počelo | tjedan 0 |
-| testing, table-driven | gotovo (ssh, certs, cmd) | proširiti u tjednu 10 |
+| graceful shutdown | gotovo (`serve`) | — |
+| env config / 12-factor | gotovo | — |
+| HTTP middleware (auth) | gotovo (`TokenAuth`) | — |
+| testing, table-driven, `httptest` | gotovo | proširiti u tjednu 10 |
 | interfaces (pravi) | djelomično | Faza 1 (`Host`, `Panel`, `Component`) + channel manager |
 | log/slog | nije počelo | tjedan 14 |
 | Prometheus metrics | nije počelo | tjedan 14 |

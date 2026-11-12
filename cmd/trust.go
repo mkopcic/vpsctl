@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mkopcic/vpsctl/internal/config"
+	"github.com/mkopcic/vpsctl/internal/ops"
 	"github.com/mkopcic/vpsctl/internal/output"
 	sshclient "github.com/mkopcic/vpsctl/internal/ssh"
 	"github.com/spf13/cobra"
@@ -62,7 +63,7 @@ func trustServer(ctx context.Context, s config.Server, in *bufio.Reader, yes boo
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	hk, err := sshclient.FetchHostKey(ctx, sshConfig(s))
+	hk, err := sshclient.FetchHostKey(ctx, ops.SSHConfig(s))
 	if err != nil {
 		return err
 	}

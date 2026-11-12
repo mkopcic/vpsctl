@@ -10,10 +10,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mkopcic/vpsctl/internal/config"
-	"github.com/mkopcic/vpsctl/internal/logger"
+	"github.com/mkopcic/vpsctl/internal/ops"
 	"github.com/mkopcic/vpsctl/internal/output"
-	sshclient "github.com/mkopcic/vpsctl/internal/ssh"
-	"github.com/mkopcic/vpsctl/internal/store"
 )
 
 var execCmd = &cobra.Command{
@@ -35,23 +33,17 @@ var execCmd = &cobra.Command{
 			return err
 		}
 
+		servers, err := ops.Targets(cfg, target)
+		if err != nil {
+			return err
+		}
+
 		// Jedan timeout za cijelu operaciju — i za "all"
 		ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 		defer cancel()
 
-		if target != "all" {
-			for _, server := range cfg.Servers {
-				if server.Name != target {
-					continue
-				}
-				runOnServer(ctx, server, command)
-				return nil
-			}
-			return fmt.Errorf("server not found: %s", target)
-		}
-
 		var wg sync.WaitGroup
-		for _, server := range cfg.Servers {
+		for _, server := range servers {
 			wg.Add(1)
 			go func(server config.Server) {
 				defer wg.Done()
@@ -63,46 +55,41 @@ var execCmd = &cobra.Command{
 	},
 }
 
-// sshConfig prevodi server iz YAML-a u SSH config
-func sshConfig(server config.Server) sshclient.Config {
-	return sshclient.Config{
-		User:     server.User,
-		Host:     server.Host,
-		Port:     server.Port,
-		Key:      server.Key,
-		Password: server.Password,
-	}
-}
+// cliRunner zapisuje jobove sa source="cli"
+var cliRunner = ops.Runner{Source: "cli"}
 
-// runOnServer izvrsava SSH komandu na jednom serveru.
-// Ne vraca error Cobri — sama handla prikaz OK/FAIL + log + DB.
-// SSH execution failure nije razlog za prikaz Usage.
+// runOnServer izvrsava SSH komandu na jednom serveru i ispisuje OK/FAIL.
+// Ne vraca error Cobri — SSH execution failure nije razlog za prikaz Usage.
+// History i log pise ops.Runner.
 func runOnServer(ctx context.Context, server config.Server, command string) {
-	start := time.Now()
+	res := cliRunner.Run(ctx, server, command)
 
-	res, err := sshclient.RunCommand(ctx, sshConfig(server), command)
-	out := res.Output()
-
-	// Spremi u SQLite bez obzira na uspjeh/neuspjeh
-	job := store.NewJob(server.Name, command, out, "", "cli", err == nil, start)
-	if err != nil {
-		job.Error = err.Error()
-	}
-	store.Save(job)
-
-	if err != nil {
+	if !res.OK() {
 		// Prepoznaj poznate greske i daj jasnu poruku
-		msg := friendlyError(out, err.Error())
-		output.Fail("%s — %s", server.Name, msg)
-		if out != "" {
-			fmt.Print(out)
+		output.Fail("%s — %s", server.Name, friendlyError(res.Output, res.Err.Error()))
+		if res.Output != "" {
+			fmt.Print(res.Output)
 		}
-		logger.Log(server.Name, command, "FAIL: "+msg+" | "+out)
 		return
 	}
 
-	output.OK("%s\n%s", server.Name, out)
-	logger.Log(server.Name, command, out)
+	output.OK("%s\n%s", server.Name, res.Output)
+}
+
+// runSequential vrti komandu server po server, svaki sa svojim timeoutom.
+// Za operacije koje mijenjaju server (update, restart) — ne zelimo ih
+// pokrenuti na svima odjednom. announce ispisuje sto se upravo radi.
+func runSequential(ctx context.Context, servers []config.Server, timeout time.Duration, command string, announce func(config.Server)) error {
+	for _, server := range servers {
+		if ctx.Err() != nil {
+			return ctx.Err() // Ctrl+C — ne kreci na sljedeci server
+		}
+		announce(server)
+		runCtx, cancel := context.WithTimeout(ctx, timeout)
+		runOnServer(runCtx, server, command)
+		cancel()
+	}
+	return nil
 }
 
 // friendlyError prepoznaje poznate sistemske greske i vraca jasnu poruku.
@@ -127,6 +114,6 @@ func friendlyError(serverOutput, sshErr string) string {
 }
 
 func init() {
-	execCmd.Flags().Duration("timeout", 30*time.Second, "Max trajanje komande (npr. 30s, 5m)")
+	execCmd.Flags().Duration("timeout", ops.ExecTimeout, "Max trajanje komande (npr. 30s, 5m)")
 	rootCmd.AddCommand(execCmd)
 }

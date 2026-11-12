@@ -27,6 +27,9 @@ type Config struct {
 	Port     int
 	Key      string
 	Password string
+	// NoPrompt iskljucuje interaktivni upis passworda. `vpsctl serve` nema
+	// terminal — prompt bi tamo visio na stdinu do timeouta.
+	NoPrompt bool
 }
 
 func (c Config) addr() string {
@@ -217,7 +220,7 @@ func buildAuth(cfg Config, beforePrompt func()) []ssh.AuthMethod {
 		}))
 	}
 
-	if cfg.Password == "" {
+	if cfg.Password == "" && !cfg.NoPrompt {
 		methods = append(methods, ssh.PasswordCallback(func() (string, error) {
 			beforePrompt()
 			fmt.Printf("Password for %s@%s: ", cfg.User, cfg.Host)

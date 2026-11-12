@@ -192,8 +192,9 @@ Gotenberg 8 ✓   supervisor ✓
 | 7 | `jobs` tablica = jedna komanda po retku | `internal/store/` | Deploy ima desetak koraka. Treba `runs` (jedan deploy/doctor) + `steps` (komanda, exit code, output, trajanje). |
 | 8 | Output stiže tek kad komanda završi | `internal/ssh/ssh.go`, API | Deploy traje minutama. `Run` treba varijantu s `io.Writer`, API ga streama u Web UI (SSE). |
 
-1–4 su riješeni (SSH refaktor + `vpsctl trust`). 6 ide prije Faze 1, 7 i 8
-prije Faze 3.
+1–6 su riješeni (SSH refaktor, `vpsctl trust`, env staze, `internal/ops`).
+Iznimka u #6: `ops.Runner` još koristi `RunCommand` (nova konekcija po
+komandi) — trajnu konekciju uvodi `Host` u Fazi 1. 7 i 8 idu prije Faze 3.
 
 ### Arhitektura — interfacei
 Ovo je mjesto gdje interfacei postaju **arhitektura**, a ne samo

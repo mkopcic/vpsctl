@@ -1,6 +1,14 @@
 package config
 
-import "github.com/spf13/viper"
+import (
+	"os"
+
+	"github.com/spf13/viper"
+)
+
+// defaultPath vrijedi kad VPSCTL_CONFIG nije postavljen — relativno na
+// working directory, kao i dosad.
+const defaultPath = "configs/servers.yaml"
 
 type Server struct {
 	Name     string `mapstructure:"name"`
@@ -27,21 +35,28 @@ func (c *Config) Find(name string) (Server, bool) {
 	return Server{}, false
 }
 
+// Path vraca put do servers.yaml.
+// VPSCTL_CONFIG ima prednost — u containeru config dolazi iz volumea ili
+// ConfigMapa, ne iz ./configs.
+func Path() string {
+	if p := os.Getenv("VPSCTL_CONFIG"); p != "" {
+		return p
+	}
+	return defaultPath
+}
+
 func Load() (*Config, error) {
+	// viper.New() umjesto globalnog vipera — svaki Load cita ispocetka,
+	// bez stanja koje bi ostalo od prethodnog poziva
+	v := viper.New()
+	v.SetConfigFile(Path())
 
-	viper.SetConfigName("servers")
-	viper.SetConfigType("yaml")
-	viper.AddConfigPath("./configs")
-
-	err := viper.ReadInConfig()
-	if err != nil {
+	if err := v.ReadInConfig(); err != nil {
 		return nil, err
 	}
 
 	var cfg Config
-
-	err = viper.Unmarshal(&cfg)
-	if err != nil {
+	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, err
 	}
 

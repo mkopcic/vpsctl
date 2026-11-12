@@ -20,6 +20,53 @@ document.getElementById('exec-cmd').addEventListener('keydown', e => {
     if (e.key === 'Enter') runExec();
 });
 
+// =============================================================
+// API TOKEN
+// =============================================================
+
+// Svaki API poziv trazi "Authorization: Bearer <token>".
+// Token dolazi iz linka koji ispise `vpsctl serve` (.../ui/#token=...)
+// ili ga korisnik upise kad server prvi put odgovori 401.
+const TOKEN_KEY = 'vpsctl_token';
+
+// Procitaj token iz URL-a i odmah ga makni iz adresne trake i povijesti
+(function readTokenFromHash() {
+    const m = location.hash.match(/token=([^&]+)/);
+    if (m) {
+        localStorage.setItem(TOKEN_KEY, decodeURIComponent(m[1]));
+        history.replaceState(null, '', location.pathname + location.search);
+    }
+})();
+
+// fetch s tokenom. Na 401 jednom pita za novi token i ponovi poziv.
+async function apiFetch(url, options = {}, retry = true) {
+    const token = localStorage.getItem(TOKEN_KEY) || '';
+    const headers = Object.assign({}, options.headers, { 'Authorization': 'Bearer ' + token });
+
+    const res = await fetch(url, Object.assign({}, options, { headers }));
+
+    if (res.status === 401) {
+        localStorage.removeItem(TOKEN_KEY);
+        if (retry) {
+            const entered = prompt('API token (ispise ga `vpsctl serve`, ili vrijednost VPSCTL_API_TOKEN):');
+            if (entered) {
+                localStorage.setItem(TOKEN_KEY, entered.trim());
+                return apiFetch(url, options, false);
+            }
+        }
+        throw new Error('neispravan ili nedostaje API token');
+    }
+
+    if (!res.ok) {
+        // API greske dolaze kao {"error": "..."}
+        let msg = res.status + ' ' + res.statusText;
+        try { msg = (await res.clone().json()).error || msg; } catch (_) {}
+        throw new Error(msg);
+    }
+
+    return res;
+}
+
 // --- STATE ---
 let serverList = [];
 
@@ -35,7 +82,7 @@ window.addEventListener('DOMContentLoaded', () => {
 async function loadServers() {
     const wrap = document.getElementById('servers-wrap');
     try {
-        const res = await fetch('/servers');
+        const res = await apiFetch('/servers');
         serverList = await res.json();
         renderServersTable(serverList, null);
         populateServerSelects();
@@ -104,7 +151,7 @@ async function pingAll() {
     btn.textContent = 'Pinging...';
 
     try {
-        const res = await fetch('/servers/ping');
+        const res = await apiFetch('/servers/ping');
         const results = await res.json();
         renderServersTable(serverList, results);
     } catch (e) {
@@ -156,7 +203,7 @@ async function runExec() {
     showOutput(out, null); // clear + show loading
 
     try {
-        const res = await fetch('/servers/exec', {
+        const res = await apiFetch('/servers/exec', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ server, command })
@@ -179,7 +226,7 @@ async function runUpdate() {
     showOutput(out, null);
 
     try {
-        const res = await fetch('/servers/update', {
+        const res = await apiFetch('/servers/update', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ server })
@@ -204,7 +251,7 @@ async function runRestart() {
     showOutput(out, null);
 
     try {
-        const res = await fetch('/servers/restart', {
+        const res = await apiFetch('/servers/restart', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ server, service })
@@ -254,7 +301,7 @@ async function loadHistory() {
         let url = `/jobs?limit=${limit}`;
         if (server) url += `&server=${encodeURIComponent(server)}`;
 
-        const res  = await fetch(url);
+        const res  = await apiFetch(url);
         const jobs = await res.json();
 
         if (!jobs || jobs.length === 0) {

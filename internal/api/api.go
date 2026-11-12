@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -11,8 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/mkopcic/vpsctl/internal/config"
-	"github.com/mkopcic/vpsctl/internal/logger"
-	sshclient "github.com/mkopcic/vpsctl/internal/ssh"
+	"github.com/mkopcic/vpsctl/internal/ops"
 	"github.com/mkopcic/vpsctl/internal/store"
 )
 
@@ -44,30 +41,20 @@ type ServerResult struct {
 	Error    string `json:"error,omitempty"` // omitempty = ne pojavljuje se u JSON-u ako je prazan
 }
 
-// Timeouti po vrsti operacije — isti defaulti kao CLI flagovi
-const (
-	execTimeout    = 30 * time.Second
-	updateTimeout  = 15 * time.Minute
-	restartTimeout = time.Minute
-)
+// apiRunner zapisuje jobove sa source="api". Bez interaktivnog prompta —
+// server nema terminal na kojem bi netko upisao password.
+var apiRunner = ops.Runner{Source: "api", NoPrompt: true}
 
-// updateScript detektira package manager automatski
-const updateScript = `
-if command -v apt-get >/dev/null 2>&1; then
-    apt-get update && apt-get upgrade -y
-elif command -v yum >/dev/null 2>&1; then
-    yum update -y
-elif command -v apk >/dev/null 2>&1; then
-    apk update && apk upgrade
-else
-    echo "unknown package manager"
-    exit 1
-fi
-`
+// Setup registrira sve rute — poziva se iz cmd/serve.go.
+// Sve API rute traze token (vidi auth.go). /healthz i /readyz ne traze:
+// Docker i Kubernetes probe ne salju Authorization header.
+func Setup(r *gin.Engine, token string) {
+	r.GET("/healthz", healthz)
+	r.GET("/readyz", readyz)
 
-// Setup registrira sve rute — poziva se iz cmd/serve.go
-func Setup(r *gin.Engine) {
-	servers := r.Group("/servers")
+	auth := r.Group("", TokenAuth(token))
+
+	servers := auth.Group("/servers")
 	{
 		servers.GET("", listServers)             // GET  /servers
 		servers.GET("/ping", pingServers)        // GET  /servers/ping
@@ -77,7 +64,7 @@ func Setup(r *gin.Engine) {
 	}
 
 	// GET /jobs?server=mellon&limit=20 — job history za web GUI
-	r.GET("/jobs", listJobs)
+	auth.GET("/jobs", listJobs)
 }
 
 // --- HANDLERI ---
@@ -170,8 +157,7 @@ func execCommand(c *gin.Context) {
 		return
 	}
 
-	results := runOnTargets(c.Request.Context(), cfg, req.Server, req.Command, execTimeout)
-	c.JSON(http.StatusOK, results)
+	runOnTargets(c, cfg, req.Server, req.Command, ops.ExecTimeout)
 }
 
 // POST /servers/update — system update na jednom ili svim serverima
@@ -190,8 +176,7 @@ func updateServers(c *gin.Context) {
 		return
 	}
 
-	results := runOnTargets(c.Request.Context(), cfg, req.Server, updateScript, updateTimeout)
-	c.JSON(http.StatusOK, results)
+	runOnTargets(c, cfg, req.Server, ops.UpdateScript, ops.UpdateTimeout)
 }
 
 // POST /servers/restart — restart systemd servisa
@@ -204,79 +189,68 @@ func restartService(c *gin.Context) {
 		return
 	}
 
+	command, err := ops.RestartCommand(req.Service)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	command := fmt.Sprintf("systemctl restart %s && systemctl is-active %s", req.Service, req.Service)
-	results := runOnTargets(c.Request.Context(), cfg, req.Server, command, restartTimeout)
-	c.JSON(http.StatusOK, results)
+	runOnTargets(c, cfg, req.Server, command, ops.RestartTimeout)
 }
 
 // --- HELPER ---
 
-// runOnTargets izvrsava komandu na jednom serveru ili svima ("all").
-// Mjeri trajanje, logira u fajl i sprema u SQLite s source="api".
-// ctx je context HTTP requesta — ako klijent prekine request, prekida se i SSH.
-func runOnTargets(ctx context.Context, cfg *config.Config, target, command string, timeout time.Duration) []ServerResult {
-	var results []ServerResult
-
-	for _, s := range cfg.Servers {
-		// Preskoči ako nije traženi server (osim ako je "all")
-		if target != "all" && s.Name != target {
-			continue
-		}
-
-		start := time.Now()
-
-		runCtx, cancel := context.WithTimeout(ctx, timeout)
-		res, err := sshclient.RunCommand(runCtx, sshclient.Config{
-			User:     s.User,
-			Host:     s.Host,
-			Port:     s.Port,
-			Key:      s.Key,
-			Password: s.Password,
-		}, command)
-		cancel()
-		out := res.Output()
-
-		// Spremi u SQLite — source="api" da razlikujemo od CLI poziva
-		job := store.NewJob(s.Name, command, out, "", "api", err == nil, start)
-		if err != nil {
-			job.Error = err.Error()
-			store.Save(job)
-
-			// Exit code postoji samo ako je komanda stvarno pokrenuta
-			exitCode := -1
-			if exitErr, ok := errors.AsType[*sshclient.ExitError](err); ok {
-				exitCode = exitErr.Code
-			}
-			results = append(results, ServerResult{
-				Server:   s.Name,
-				Output:   out,
-				OK:       false,
-				ExitCode: exitCode,
-				Error:    err.Error(),
-			})
-		} else {
-			store.Save(job)
-			logger.Log(s.Name, command, out)
-			results = append(results, ServerResult{
-				Server: s.Name,
-				Output: out,
-				OK:     true,
-			})
-		}
-
-		// Ako je tražen jedan server, stani
-		if target != "all" {
-			break
-		}
+// runOnTargets izvrsava komandu na jednom serveru ili svima ("all") i salje
+// JSON odgovor. SSH, history i log radi ops.Runner.
+// Context je onaj HTTP requesta — ako klijent prekine request, prekida se i SSH.
+func runOnTargets(c *gin.Context, cfg *config.Config, target, command string, timeout time.Duration) {
+	servers, err := ops.Targets(cfg, target)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
 	}
 
-	return results
+	// Prazan array umjesto null ako nema servera
+	results := []ServerResult{}
+
+	for _, s := range servers {
+		runCtx, cancel := context.WithTimeout(c.Request.Context(), timeout)
+		res := apiRunner.Run(runCtx, s, command)
+		cancel()
+
+		sr := ServerResult{
+			Server:   res.Server,
+			Output:   res.Output,
+			OK:       res.OK(),
+			ExitCode: res.ExitCode,
+		}
+		if res.Err != nil {
+			sr.Error = res.Err.Error()
+		}
+		results = append(results, sr)
+	}
+
+	c.JSON(http.StatusOK, results)
+}
+
+// GET /healthz — proces je ziv. Uvijek 200.
+func healthz(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// GET /readyz — spreman za promet tek kad je baza otvorena.
+func readyz(c *gin.Context) {
+	if err := store.Ping(c.Request.Context()); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not ready", "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ready"})
 }
 
 // GET /jobs?server=mellon&limit=20

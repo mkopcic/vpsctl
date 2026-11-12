@@ -49,8 +49,11 @@ vpsctl serve --port 9000
 
 ```bash
 vpsctl serve
-# otvori http://localhost:8080
+# otvori link koji ispise: http://127.0.0.1:8080/ui/#token=...
 ```
+
+Server po defaultu slusa samo na `127.0.0.1`. UI zapamti token iz linka; ako ga
+nema, pita za njega pri prvom API pozivu.
 
 Embedded u binary — nema eksternih fajlova. Cetiri taba:
 
@@ -71,6 +74,29 @@ Embedded u binary — nema eksternih fajlova. Cetiri taba:
 | POST | `/servers/update` | `{"server":"all"}` | System update |
 | POST | `/servers/restart` | `{"server":"mellon","service":"nginx"}` | Restart servisa |
 | GET | `/jobs` | `?server=mellon&limit=20` | Job history |
+| GET | `/healthz` | — | Proces je ziv (bez tokena) |
+| GET | `/readyz` | — | Baza je otvorena (bez tokena) |
+
+### API token
+
+API izvrsava komande na svim serverima, pa svaki request (osim `/healthz` i
+`/readyz`) trazi token:
+
+```bash
+curl -H "Authorization: Bearer $VPSCTL_API_TOKEN" http://127.0.0.1:8080/servers
+```
+
+- `VPSCTL_API_TOKEN` postavljen — vrijedi taj token.
+- Nije postavljen, server na loopbacku — generira se novi pri svakom
+  pokretanju i ispise u terminal.
+- Nije postavljen, server na drugoj adresi (`--listen 0.0.0.0`) — `serve`
+  odbija startati.
+
+Ne izlazi API na javni port ni s tokenom: promet je obican HTTP. Pristup s
+drugog racunala ide kroz SSH tunel ili WireGuard.
+
+`serve` nema interaktivni upis passworda — serveri moraju imati `key:` ili
+`password:` u configu.
 
 ---
 
@@ -92,6 +118,21 @@ servers:
 ```
 
 > `servers.yaml` nije na gitu. Koristi `servers.example.yaml` kao predlozak.
+
+### Env varijable
+
+Sve staze imaju default relativan na working directory; env varijabla ga
+mijenja (Docker, systemd, pokretanje iz drugog direktorija).
+
+| Varijabla | Default | Sto je |
+|---|---|---|
+| `VPSCTL_CONFIG` | `configs/servers.yaml` | Put do config fajla |
+| `VPSCTL_DATA` | `data` | Direktorij za SQLite bazu (`vpsctl.db`) |
+| `VPSCTL_LOG_FILE` | `logs/vpsctl.log` | Log fajl. U `serve` modu bez ove varijable log ide na stdout |
+| `VPSCTL_KNOWN_HOSTS` | `~/.ssh/known_hosts` | Provjera host kljuceva |
+| `VPSCTL_LISTEN` | `127.0.0.1` | Adresa za `serve` (isto sto i `--listen`) |
+| `VPSCTL_PORT` | `8080` | Port za `serve` (isto sto i `--port`) |
+| `VPSCTL_API_TOKEN` | — | Token za API (vidi gore) |
 
 ---
 
@@ -123,7 +164,7 @@ echo "user ALL=(ALL) NOPASSWD: /bin/systemctl" >> /etc/sudoers.d/vpsctl
 
 ## Logging i history
 
-- `logs/vpsctl.log` — plain text log svake operacije
+- `logs/vpsctl.log` — plain text log svake operacije (`serve`: stdout)
 - `data/vpsctl.db` — SQLite, trajanje, source (cli/api)
 
 ```bash
@@ -142,11 +183,12 @@ vpsctl/
 │   ├── restart.go, history.go, serve.go
 ├── internal/
 │   ├── config/config.go
-│   ├── ssh/ssh.go
+│   ├── ssh/ssh.go + hostkeys.go
+│   ├── ops/ops.go          (SSH + history + log, dijele ga CLI i API)
 │   ├── output/output.go
 │   ├── logger/logger.go
 │   ├── store/store.go + job.go
-│   ├── api/api.go
+│   ├── api/api.go + auth.go
 │   └── web/
 │       ├── web.go
 │       └── static/ (index.html, style.css, app.js)

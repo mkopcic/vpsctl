@@ -148,11 +148,13 @@
             <div class="api-example">
                 <h3>curl primjeri</h3>
                 <pre>
+# Svaki poziv trazi token (VPSCTL_API_TOKEN ili onaj koji ispise `vpsctl serve`)
+
 # Lista servera
-curl http://localhost:8080/servers
+curl -H "Authorization: Bearer $VPSCTL_API_TOKEN" http://localhost:8080/servers
 
 # Ping svih
-curl http://localhost:8080/servers/ping
+curl -H "Authorization: Bearer $VPSCTL_API_TOKEN" http://localhost:8080/servers/ping
 
 # Exec na jednom serveru
 curl -X POST http://localhost:8080/servers/exec \
@@ -170,7 +172,7 @@ curl -X POST http://localhost:8080/servers/restart \
   -d '{"server":"mellon","service":"nginx"}'
 
 # Job history
-curl "http://localhost:8080/jobs?limit=10&server=mellon"
+curl -H "Authorization: Bearer $VPSCTL_API_TOKEN" "http://localhost:8080/jobs?limit=10&server=mellon"
                 </pre>
             </div>
         </div>
