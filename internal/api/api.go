@@ -85,7 +85,8 @@ func listServers(c *gin.Context) {
 		User string `json:"user"`
 	}
 
-	var list []ServerInfo
+	// Prazan array umjesto null ako nema servera — UI radi list.map(...)
+	list := []ServerInfo{}
 	for _, s := range cfg.Servers {
 		list = append(list, ServerInfo{
 			Name: s.Name,
@@ -115,7 +116,7 @@ func pingServers(c *gin.Context) {
 
 	// Ping je brz pa ne trebamo goroutine ovdje, radimo sekvencijalno
 	// Ako zelis paralelno, ista logika kao u cmd/ping.go s WaitGroup
-	var results []PingResult
+	results := []PingResult{}
 
 	for _, s := range cfg.Servers {
 		addr := net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
